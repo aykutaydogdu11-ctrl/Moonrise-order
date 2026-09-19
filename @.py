@@ -5,60 +5,102 @@ import base64
 
 app = Flask(__name__)
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY")
+)
 
 PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Moonrise Order App</title>
+<meta name="viewport"
+content="width=device-width, initial-scale=1">
+<title>Moonrise Order App</title>
 </head>
 
-<body style="font-family: Arial; padding: 20px; max-width: 700px; margin: auto;">
+<body style="font-family:Arial;padding:20px">
 
-    <h1>Moonrise Order App</h1>
-    <h2>Order Photo</h2>
+<h1>Moonrise Order App</h1>
+<h2>Order Photo</h2>
 
-    <form method="POST" enctype="multipart/form-data">
+<form method="POST"
+enctype="multipart/form-data">
 
-        <input
-            type="file"
-            name="photo"
-            accept="image/*"
-            capture="environment"
-            required
-        >
+<input
+type="file"
+name="photo"
+accept="image/*"
+capture="environment"
+required>
 
-        <br><br>
+<br><br>
 
-        <button type="submit" style="padding:12px 20px;">
-            Read Order
-        </button>
+<button type="submit">
+Read Order
+</button>
 
-    </form>
+</form>
 
-    {% if result %}
+{% if result %}
 
-        <hr>
+<hr>
+<h2>Order Read</h2>
 
-        <h2>Order Read</h2>
+<div style="white-space:pre-wrap;
+background:#eee;
+padding:15px">
 
-        <div style="
-            white-space: pre-wrap;
-            background: #f2f2f2;
-            padding: 15px;
-            border-radius: 10px;
-            font-size: 18px;
-        ">{{ result }}</div>
+{{ result }}
 
-    {% endif %}
+</div>
+
+{% endif %}
 
 </body>
 </html>
 """
 
+PROMPT = """
+Read this handwritten cafe order slip.
 
+Codes:
+C = White Coffee
+BC = Black Coffee
+L = Latte
+Can = Can drink
+Bottle = Bottle drink
+E = Egg
+SE = Scrambled Egg
+B = Bacon
+S = Sausage
+Bubble = Bubble
+
+2E = 2 Eggs
+3B = 3 Bacon
+2S = 2 Sausages
+L x2 = 2 Lattes
+
+Dots separate products.
+
+A circled number is normally
+the table number.
+
+Hope 1, Hope 2, Hope 3 and Hope 4
+are set menus.
+
+No S -> Bubble means remove
+Sausage and replace it with Bubble.
+
+Do not guess unreadable handwriting.
+
+Return:
+TABLE:
+DRINKS:
+SET MENU:
+ITEMS:
+CHANGES:
+UNCERTAIN:
+"""
 @app.route("/", methods=["GET", "POST"])
 def home():
 
@@ -72,26 +114,48 @@ def home():
 
             try:
 
-                image_bytes = photo.read()
-
-                image_base64 = base64.b64encode(
-                    image_bytes
+                image = base64.b64encode(
+                    photo.read()
                 ).decode("utf-8")
 
-                mime_type = photo.mimetype or "image/jpeg"
+                mime = photo.mimetype or "image/jpeg"
 
                 response = client.responses.create(
-
-                    model="gpt-5.6-luna",
-
+                    model="gpt-5.4-nano",
                     input=[
                         {
                             "role": "user",
                             "content": [
-
                                 {
                                     "type": "input_text",
-                                    "text": """
-You are reading a handwritten order slip from Moonrise / Hope Cafe.
+                                    "text": PROMPT
+                                },
+                                {
+                                    "type": "input_image",
+                                    "image_url":
+                                    "data:" + mime +
+                                    ";base64," + image
+                                }
+                            ]
+                        }
+                    ]
+                )
 
-Read the handwriting
+                result = response.output_text
+
+            except Exception as e:
+
+                result = "ERROR: " + str(e)
+
+    return render_template_string(
+        PAGE,
+        result=result
+    )
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=10000
+    )

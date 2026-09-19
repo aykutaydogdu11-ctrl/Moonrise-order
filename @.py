@@ -279,24 +279,24 @@ UNKNOWN:
 
                     for line in result.splitlines():
 
-    if line.upper().startswith("UNKNOWN:"):
+                        if line.upper().startswith("UNKNOWN:"):
 
-        value = line.split(
-            ":", 1
-        )[1].strip()
+                            value = line.split(
+                                ":", 1
+                            )[1].strip()
 
-        if value and value.lower() not in [
-            "none",
-            "n/a",
-            "unknown"
-        ]:
+                            if value and value.lower() not in [
+                                "none",
+                                "n/a",
+                                "unknown"
+                            ]:
 
-            for code in value.split(","):
+                                for code in value.split(","):
 
-                code = code.strip()
+                                    code = code.strip()
 
-                if code and code not in unknowns:
-                    unknowns.append(code)
+                                    if code and code not in unknowns:
+                                        unknowns.append(code)
                 except Exception as e:
 
                     result = "ERROR: " + str(e)

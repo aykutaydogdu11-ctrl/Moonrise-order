@@ -10,7 +10,7 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 RULES_FILE = "learned_codes.json"
 
 DEFAULT_CODES = {
-    "C": "Coffee",
+    "C": "White Coffee",
     "BC": "Black Coffee",
     "L": "Latte",
     "Can": "Can drink",
@@ -194,6 +194,41 @@ Known codes:
 IMPORTANT RULES:
 
 A dot . is the ONLY separator between different products.
+VERY IMPORTANT:
+
+Never skip a product between dots.
+
+Each section separated by a dot . represents one product.
+The number of readable sections must match the number of products in the result.
+
+Example:
+
+C . L . Bottle
+
+has 3 products and MUST produce all 3:
+White Coffee
+Latte
+Bottle
+
+Do not merge them.
+Do not omit L.
+Do not change C into BC.
+C means White Coffee.
+BC means Black Coffee.
+L means Latte.
+
+Example:
+
+E . B . PE
+
+has 3 products and MUST produce all 3:
+Egg
+Bacon
+PE
+
+If PE is unknown, keep PE in the item AND put PE in UNKNOWN.
+
+Never drop E, B, C, L or any other clearly readable known code.
 
 The + sign is NOT used as a separator.
 Do NOT interpret + as separating products.

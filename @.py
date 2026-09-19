@@ -244,7 +244,41 @@ in the known codes, write:
 
 UNKNOWN: followed by the code.
 
-Return:
+UNKNOWN RULES:
+
+First try to understand an unknown handwritten code using the
+cafe context.
+
+If you are reasonably confident what it means, use the product
+name normally and DO NOT put that code in UNKNOWN.
+
+Example:
+If T clearly appears to mean Tea, output Tea under DRINKS.
+Do NOT also put T under UNKNOWN.
+
+Only use UNKNOWN when you genuinely cannot determine what a code means.
+
+VERY IMPORTANT:
+UNKNOWN must contain ONLY individual raw handwritten codes.
+Do not write explanations, sentences or comments in UNKNOWN.
+Do not use brackets or descriptions.
+Do not put known codes in UNKNOWN.
+Do not put a whole expression such as F + S into UNKNOWN.
+Separate unknown codes individually.
+
+For example, if you cannot understand T, F0 and ON, output exactly:
+
+UNKNOWN:
+T
+F0
+ON
+
+If there are no genuinely unknown codes, output exactly:
+
+UNKNOWN:
+None
+
+Return the order using exactly this structure:
 
 TABLE:
 DRINKS:

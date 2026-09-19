@@ -1,6 +1,11 @@
 from flask import Flask, request, render_template_string
+from openai import OpenAI
+import os
+import base64
 
 app = Flask(__name__)
+
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 PAGE = """
 <!DOCTYPE html>
@@ -10,7 +15,7 @@ PAGE = """
     <title>Moonrise Order App</title>
 </head>
 
-<body style="font-family: Arial; padding: 20px;">
+<body style="font-family: Arial; padding: 20px; max-width: 700px; margin: auto;">
 
     <h1>Moonrise Order App</h1>
     <h2>Order Photo</h2>
@@ -27,40 +32,66 @@ PAGE = """
 
         <br><br>
 
-        <button type="submit">
+        <button type="submit" style="padding:12px 20px;">
             Read Order
         </button>
 
     </form>
 
-    {% if message %}
-        <h3>{{ message }}</h3>
+    {% if result %}
+
+        <hr>
+
+        <h2>Order Read</h2>
+
+        <div style="
+            white-space: pre-wrap;
+            background: #f2f2f2;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 18px;
+        ">{{ result }}</div>
+
     {% endif %}
 
 </body>
 </html>
 """
 
+
 @app.route("/", methods=["GET", "POST"])
 def home():
 
-    message = ""
+    result = ""
 
     if request.method == "POST":
 
         photo = request.files.get("photo")
 
         if photo:
-            message = "Photo received successfully!"
 
-    return render_template_string(
-        PAGE,
-        message=message
-    )
+            try:
 
+                image_bytes = photo.read()
 
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=10000
-    )
+                image_base64 = base64.b64encode(
+                    image_bytes
+                ).decode("utf-8")
+
+                mime_type = photo.mimetype or "image/jpeg"
+
+                response = client.responses.create(
+
+                    model="gpt-5.6-luna",
+
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+
+                                {
+                                    "type": "input_text",
+                                    "text": """
+You are reading a handwritten order slip from Moonrise / Hope Cafe.
+
+Read the handwriting

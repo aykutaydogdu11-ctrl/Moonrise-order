@@ -457,7 +457,7 @@ If there are no unknown codes, write None.
                     lines = result.splitlines()
     
                     for i, line in enumerate(lines):
-                    stripped = line.strip()
+                        stripped = line.strip()
     
                 if stripped.upper() == "UNKNOWN:":
                     for next_line in lines[i + 1:]:

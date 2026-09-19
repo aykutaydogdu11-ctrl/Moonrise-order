@@ -2,12 +2,52 @@ from flask import Flask, request, render_template_string
 from openai import OpenAI
 import os
 import base64
+import json
 
 app = Flask(__name__)
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY")
-)
+RULES_FILE = "learned_codes.json"
+
+DEFAULT_CODES = {
+    "C": "Coffee",
+    "BC": "Black Coffee",
+    "L": "Latte",
+    "Can": "Can drink",
+    "Bottle": "Bottle drink",
+    "E": "Egg",
+    "SE": "Scrambled Egg",
+    "B": "Bacon",
+    "S": "Sausage",
+    "Bubble": "Bubble"
+}
+
+def load_codes():
+    codes = DEFAULT_CODES.copy()
+
+    try:
+        with open(RULES_FILE, "r") as f:
+            codes.update(json.load(f))
+    except:
+        pass
+
+    return codes
+
+
+def save_code(code, meaning):
+    learned = {}
+
+    try:
+        with open(RULES_FILE, "r") as f:
+            learned = json.load(f)
+    except:
+        pass
+
+    learned[code] = meaning
+
+    with open(RULES_FILE, "w") as f:
+        json.dump(learned, f)
+
 
 PAGE = """
 <!DOCTYPE html>
@@ -15,16 +55,19 @@ PAGE = """
 <head>
 <meta name="viewport"
 content="width=device-width, initial-scale=1">
+
 <title>Moonrise Order App</title>
 </head>
 
-<body style="font-family:Arial;padding:20px">
+<body style="font-family:Arial;padding:20px;max-width:700px;margin:auto">
 
 <h1>Moonrise Order App</h1>
-<h2>Order Photo</h2>
 
-<form method="POST"
-enctype="multipart/form-data">
+<h2>Read Order</h2>
+
+<form method="POST" enctype="multipart/form-data">
+
+<input type="hidden" name="action" value="read">
 
 <input
 type="file"
@@ -44,46 +87,114 @@ Read Order
 {% if result %}
 
 <hr>
-<h2>Order Read</h2>
+<h2>Order</h2>
 
-<div style="white-space:pre-wrap;
-background:#eee;
-padding:15px">
-
+<div style="white-space:pre-wrap;background:#eee;padding:15px">
 {{ result }}
-
 </div>
+
+{% endif %}
+
+{% if unknown %}
+
+<hr>
+
+<h3>Teach Moonrise</h3>
+
+<p>
+I don't know this code:
+<strong>{{ unknown }}</strong>
+</p>
+
+<form method="POST">
+
+<input type="hidden" name="action" value="learn">
+
+<input type="hidden"
+name="code"
+value="{{ unknown }}">
+
+<input
+type="text"
+name="meaning"
+placeholder="Example: Sausage"
+required>
+
+<button type="submit">
+Save
+</button>
+
+</form>
+
+{% endif %}
+
+{% if saved %}
+
+<p><strong>{{ saved }}</strong></p>
 
 {% endif %}
 
 </body>
 </html>
 """
+@app.route("/", methods=["GET", "POST"])
+def home():
 
-PROMPT = """
-Read this handwritten cafe order slip.
+    result = ""
+    unknown = ""
+    saved = ""
 
-Codes:
-C = White Coffee
-BC = Black Coffee
-L = Latte
-Can = Can drink
-Bottle = Bottle drink
-E = Egg
-SE = Scrambled Egg
-B = Bacon
-S = Sausage
-Bubble = Bubble
+    if request.method == "POST":
 
-2E = 2 Eggs
-3B = 3 Bacon
-2S = 2 Sausages
-L x2 = 2 Lattes
+        action = request.form.get("action")
 
-Dots separate products.
+        if action == "learn":
 
-A circled number is normally
-the table number.
+            code = request.form.get("code", "").strip()
+            meaning = request.form.get("meaning", "").strip()
+
+            if code and meaning:
+                save_code(code, meaning)
+                saved = code + " = " + meaning + " saved."
+
+        elif action == "read":
+
+            photo = request.files.get("photo")
+
+            if photo:
+
+                try:
+                    image = base64.b64encode(
+                        photo.read()
+                    ).decode("utf-8")
+
+                    mime = photo.mimetype or "image/jpeg"
+
+                    codes = load_codes()
+
+                    code_text = "\n".join(
+                        key + " = " + value
+                        for key, value in codes.items()
+                    )
+
+                    prompt = """
+Read this handwritten cafe order.
+
+Known codes:
+""" + code_text + """
+
+IMPORTANT:
++ and dots separate products.
+Each code is a separate product.
+
+Examples:
+C + B means Coffee AND Bacon.
+BC + E means Black Coffee AND Egg.
+2E means 2 Eggs.
+3B means 3 Bacon.
+L x2 means 2 Lattes.
+
+A circled number is usually the table number.
 
 Hope 1, Hope 2, Hope 3 and Hope 4
 are set menus.
@@ -91,65 +202,70 @@ are set menus.
 No S -> Bubble means remove
 Sausage and replace it with Bubble.
 
-Do not guess unreadable handwriting.
+Do not guess unknown shorthand.
+
+If you see shorthand that is not
+in the known codes, write:
+
+UNKNOWN: followed by the code.
 
 Return:
+
 TABLE:
 DRINKS:
 SET MENU:
 ITEMS:
 CHANGES:
-UNCERTAIN:
+UNKNOWN:
 """
-@app.route("/", methods=["GET", "POST"])
-def home():
 
-    result = ""
+                    response = client.responses.create(
+                        model="gpt-5.4-nano",
+                        input=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_text",
+                                        "text": prompt
+                                    },
+                                    {
+                                        "type": "input_image",
+                                        "image_url":
+                                        "data:" + mime +
+                                        ";base64," + image
+                                    }
+                                ]
+                            }
+                        ]
+                    )
 
-    if request.method == "POST":
+                    result = response.output_text
 
-        photo = request.files.get("photo")
+                    for line in result.splitlines():
 
-        if photo:
+                        if line.upper().startswith("UNKNOWN:"):
 
-            try:
+                            value = line.split(
+                                ":", 1
+                            )[1].strip()
 
-                image = base64.b64encode(
-                    photo.read()
-                ).decode("utf-8")
+                            if value and value.lower() not in [
+                                "none",
+                                "n/a",
+                                "unknown"
+                            ]:
+                                unknown = value
 
-                mime = photo.mimetype or "image/jpeg"
+                except Exception as e:
 
-                response = client.responses.create(
-                    model="gpt-5.4-nano",
-                    input=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": PROMPT
-                                },
-                                {
-                                    "type": "input_image",
-                                    "image_url":
-                                    "data:" + mime +
-                                    ";base64," + image
-                                }
-                            ]
-                        }
-                    ]
-                )
-
-                result = response.output_text
-
-            except Exception as e:
-
-                result = "ERROR: " + str(e)
+                    result = "ERROR: " + str(e)
 
     return render_template_string(
         PAGE,
-        result=result
+        result=result,
+        unknown=unknown,
+        saved=saved
     )
 
 

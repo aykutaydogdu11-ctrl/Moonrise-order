@@ -309,48 +309,92 @@ Never mistake handwritten T or any letter in TST for a separator.
 Always read the complete handwritten food phrase before deciding
 that individual parts are UNKNOWN.
 UNKNOWN RULES:
+Never silently ignore handwritten text.
 
-First try to understand an unknown handwritten code using the
-cafe context.
+Every readable order line on the paper must appear somewhere in the result.
 
-If you are reasonably confident what it means, use the product
-name normally and DO NOT put that code in UNKNOWN.
+First check whether a code exists in the KNOWN CODES.
+If a code is known, use its saved meaning.
+
+If a short product code is NOT in KNOWN CODES, do NOT invent its meaning.
+Keep the exact code in the order and also put it in UNKNOWN.
 
 Example:
-If T clearly appears to mean Tea, output Tea under DRINKS.
-Do NOT also put T under UNKNOWN.
 
-Only use UNKNOWN when you genuinely cannot determine what a code means.
+E . B . PE
 
-VERY IMPORTANT:
-UNKNOWN must contain ONLY individual raw handwritten codes.
-Do not write explanations, sentences or comments in UNKNOWN.
-Do not use brackets or descriptions.
-Do not put known codes in UNKNOWN.
-Do not put a whole expression such as F + S into UNKNOWN.
-Separate unknown codes individually.
+If E and B are known but PE is not known, output:
 
-For example, if you cannot understand T, F0 and ON, output exactly:
+- Egg
+- Bacon
+- PE
 
 UNKNOWN:
-T
-F0
-ON
+PE
 
-If there are no genuinely unknown codes, output exactly:
+Unknown codes must NEVER cause the rest of the line to disappear.
+
+If one part of a line is unknown, still process all known parts of that line.
+
+UNKNOWN must contain only the exact handwritten unknown code.
+Do not put explanations, quantities, connector words or complete food
+instructions in UNKNOWN.
+
+Numbers are quantities, not unknown codes.
+ON is a connector word, not an unknown product.
+
+If there are no unknown product codes, output:
 
 UNKNOWN:
 None
 
 Return the order using exactly this structure:
 
-TABLE:
 DRINKS:
-SET MENU:
+List ONLY drinks here.
+Write each drink on a separate line.
+Convert known drink codes to their product names.
+
 ITEMS:
-CHANGES:
+Number each separate food order starting from 1.
+Set menus such as Hope 1, Hope 2, Hope 3 and Hope 4 are also ITEMS.
+Do not put set menus in a separate SET MENU section.
+
+Any change written directly under a food or set menu belongs to that item.
+
+Example:
+
+Hope 1
+No E -> S
+
+must be shown as:
+
+2- Hope 1
+   No E -> S
+
+Do not move No E -> S to another item.
+Keep related instructions underneath the food they belong to.
+
+Example:
+
+1- Scrambled Egg on 2 Toast
+
+2- Hope 1
+   No E -> S
+
+3- Egg
+   Bacon
+   PE
+
+Do NOT silently remove any handwritten food line.
+
+TABLE:
+Write the table number here.
+
 UNKNOWN:
-"""
+Write each unknown product code here.
+If there are no unknown codes, write None.
+
 
                     response = client.responses.create(
                         model="gpt-5.4-nano",

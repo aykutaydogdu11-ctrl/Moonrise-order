@@ -452,38 +452,39 @@ If there are no unknown codes, write None.
                         ]
                     )
 
-                                    result = response.output_text
-    
-                lines = result.splitlines()
-    
-                for i, line in enumerate(lines):
-                    stripped = line.strip()
-    
-                    if stripped.upper() == "UNKNOWN:":
-                        for next_line in lines[i + 1:]:
-                            code = next_line.strip()
-    
-                            if not code:
-                                continue
-    
-                            if code.upper().endswith(":"):
-                                break
-    
-                            if code.lower() in ["none", "n/a", "unknown"]:
-                                break
-    
-                            if code not in unknowns:
-                                unknowns.append(code)
-    
-                    elif stripped.upper().startswith("UNKNOWN:"):
-                        value = stripped.split(":", 1)[1].strip()
-    
-                        if value and value.lower() not in ["none", "n/a", "unknown"]:
-                            for code in value.split(","):
-                                code = code.strip()
-    
-                                if code and code not in unknowns:
+                    result = response.output_text
+
+                    lines = result.splitlines()
+
+                    for i, line in enumerate(lines):
+                        stripped = line.strip()
+
+                        if stripped.upper() == "UNKNOWN:":
+                            for next_line in lines[i + 1:]:
+                                code = next_line.strip()
+
+                                if not code:
+                                    continue
+
+                                if code.upper().endswith(":"):
+                                    break
+
+                                if code.lower() in ["none", "n/a", "unknown"]:
+                                    break
+
+                                if code not in unknowns:
                                     unknowns.append(code)
+
+                        elif stripped.upper().startswith("UNKNOWN:"):
+                            value = stripped.split(":", 1)[1].strip()
+
+                            if value and value.lower() not in ["none", "n/a", "unknown"]:
+                                for code in value.split(","):
+                                    code = code.strip()
+
+                                    if code and code not in unknowns:
+                                        unknowns.append(code)
+
                 except Exception as e:
 
                     result = "ERROR: " + str(e)

@@ -454,7 +454,7 @@ If there are no unknown codes, write None.
 
                     result = response.output_text
 
-                        lines = result.splitlines()
+                    lines = result.splitlines()
     
                     for i, line in enumerate(lines):
                 stripped = line.strip()

@@ -141,8 +141,8 @@ Save
 def home():
 
     result = ""
-    unknown = ""
-    saved = ""
+unknowns = []
+saved = ""
 
     if request.method == "POST":
 

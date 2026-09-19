@@ -95,29 +95,33 @@ Read Order
 
 {% endif %}
 
-{% if unknown %}
+{% if unknowns %}
 
 <hr>
 
 <h3>Teach Moonrise</h3>
 
-<p>
-I don't know this code:
-<strong>{{ unknown }}</strong>
-</p>
+<p>I found codes I don't know:</p>
 
-<form method="POST">
+{% for code in unknowns %}
 
-<input type="hidden" name="action" value="learn">
+<div style="margin-bottom:15px;">
+
+<strong>{{ code }}</strong>
+
+<form method="POST" style="display:inline;">
+
+<input type="hidden"
+name="action"
+value="learn">
 
 <input type="hidden"
 name="code"
-value="{{ unknown }}">
+value="{{ code }}">
 
-<input
-type="text"
+<input type="text"
 name="meaning"
-placeholder="Example: Sausage"
+placeholder="What does {{ code }} mean?"
 required>
 
 <button type="submit">
@@ -126,7 +130,12 @@ Save
 
 </form>
 
+</div>
+
+{% endfor %}
+
 {% endif %}
+
 
 {% if saved %}
 
@@ -270,19 +279,24 @@ UNKNOWN:
 
                     for line in result.splitlines():
 
-                        if line.upper().startswith("UNKNOWN:"):
+    if line.upper().startswith("UNKNOWN:"):
 
-                            value = line.split(
-                                ":", 1
-                            )[1].strip()
+        value = line.split(
+            ":", 1
+        )[1].strip()
 
-                            if value and value.lower() not in [
-                                "none",
-                                "n/a",
-                                "unknown"
-                            ]:
-                                unknown = value
+        if value and value.lower() not in [
+            "none",
+            "n/a",
+            "unknown"
+        ]:
 
+            for code in value.split(","):
+
+                code = code.strip()
+
+                if code and code not in unknowns:
+                    unknowns.append(code)
                 except Exception as e:
 
                     result = "ERROR: " + str(e)
@@ -290,7 +304,7 @@ UNKNOWN:
     return render_template_string(
         PAGE,
         result=result,
-        unknown=unknown,
+        unknowns=unknowns,
         saved=saved
     )
 

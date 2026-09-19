@@ -394,7 +394,7 @@ Write the table number here.
 UNKNOWN:
 Write each unknown product code here.
 If there are no unknown codes, write None.
-
+"""
 
                     response = client.responses.create(
                         model="gpt-5.4-nano",

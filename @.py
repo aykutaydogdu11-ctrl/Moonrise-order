@@ -182,17 +182,43 @@ Read this handwritten cafe order.
 
 Known codes:
 """ + code_text + """
+IMPORTANT RULES:
 
-IMPORTANT:
-+ and dots separate products.
-Each code is a separate product.
+The + sign and dots are SEPARATORS between different products.
+NEVER combine the codes on either side of + into one product.
 
-Examples:
-C + B means Coffee AND Bacon.
-BC + E means Black Coffee AND Egg.
+Read each code separately from left to right.
+
+For example:
+T + C = two separate products:
+- T
+- C
+
+Because C is in the known codes, C must be Coffee.
+
+If T is not in the known codes, try to interpret T from the
+handwriting and cafe context. If you are confident T means Tea,
+write Tea.
+
+If you cannot confidently understand T, write:
+UNKNOWN: T
+
+NEVER interpret T + C as "Coffee (T + C)".
+NEVER ignore one side of a + sign.
+
+More examples:
+C + B = Coffee AND Bacon.
+BC + E = Black Coffee AND Egg.
+C + L = Coffee AND Latte.
+BC + C = Black Coffee AND Coffee.
+
 2E means 2 Eggs.
 3B means 3 Bacon.
 L x2 means 2 Lattes.
+
+Known codes always have priority over guesses.
+Do not change the meaning of a known code.
+
 
 A circled number is usually the table number.
 

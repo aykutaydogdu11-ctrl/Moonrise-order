@@ -244,6 +244,40 @@ in the known codes, write:
 
 UNKNOWN: followed by the code.
 
+ORDER PHRASE RULES:
+
+Some handwritten codes combine to form one complete food order.
+Do not automatically treat every word or code as a separate product.
+
+SE = Scrambled Egg
+TST = Toast
+ON = the word "on". It is a connector, NOT a product.
+BROWN = Brown bread/toast.
+
+IMPORTANT EXAMPLE:
+
+SE ON 2 TST (BROWN)
+
+must be interpreted as:
+
+Scrambled Egg on 2 Brown Toast
+
+In this pattern:
+SE means Scrambled Egg.
+ON connects the food to the toast.
+2 means quantity 2.
+TST means Toast.
+BROWN means Brown Toast.
+
+Do NOT put ON, 2, TST or BROWN in UNKNOWN when they are used
+in this pattern.
+
+Numbers such as 1, 2 and 3 usually indicate quantity.
+A number by itself is NOT an unknown product code.
+
+Always try to understand the complete handwritten food phrase
+before deciding that individual parts are UNKNOWN.
+
 UNKNOWN RULES:
 
 First try to understand an unknown handwritten code using the

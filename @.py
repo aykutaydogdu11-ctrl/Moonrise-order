@@ -193,37 +193,59 @@ Known codes:
 """ + code_text + """
 IMPORTANT RULES:
 
-The + sign and dots are SEPARATORS between different products.
-NEVER combine the codes on either side of + into one product.
+A dot . is the ONLY separator between different products.
 
-Read each code separately from left to right.
+The + sign is NOT used as a separator.
+Do NOT interpret + as separating products.
 
-For example:
-T + C = two separate products:
-- T
-- C
+Read each product between dots separately from left to right.
 
-Because C is in the known codes, C must be Coffee.
+Examples:
 
-If T is not in the known codes, try to interpret T from the
-handwriting and cafe context. If you are confident T means Tea,
-write Tea.
+C . L
+means:
+Coffee
+Latte
 
-If you cannot confidently understand T, write:
-UNKNOWN: T
+T . C
+means:
+Tea
+Coffee
 
-NEVER interpret T + C as "Coffee (T + C)".
-NEVER ignore one side of a + sign.
+BC . E
+means:
+Black Coffee
+Egg
 
-More examples:
-C + B = Coffee AND Bacon.
-BC + E = Black Coffee AND Egg.
-C + L = Coffee AND Latte.
-BC + C = Black Coffee AND Coffee.
+B . S
+means:
+Bacon
+Sausage
 
 2E means 2 Eggs.
 3B means 3 Bacon.
 L x2 means 2 Lattes.
+
+Numbers normally indicate quantity.
+A number is NOT an unknown product code.
+
+A dot . separates different products.
+Spaces can be part of one complete food instruction.
+
+For example:
+
+SE ON 2 TST (BROWN)
+
+is ONE food instruction and means:
+
+Scrambled Egg on 2 Brown Toast
+
+SE = Scrambled Egg
+ON = the word "on", not a product
+TST = Toast
+BROWN = Brown Toast
+
+Never interpret any letter in TST as a separator.
 
 Known codes always have priority over guesses.
 Do not change the meaning of a known code.
@@ -249,17 +271,24 @@ ORDER PHRASE RULES:
 Some handwritten codes combine to form one complete food order.
 Do not automatically treat every word or code as a separate product.
 
-SE = Scrambled Egg
-TST = Toast
-ON = the word "on". It is a connector, NOT a product.
-BROWN = Brown bread/toast.
+The dot . is the ONLY separator between different products.
 
-IMPORTANT EXAMPLE:
+Example:
+B . S . E
 
+means three separate products:
+Bacon
+Sausage
+Egg
+
+A space does NOT separate products.
+
+Some codes and words together form one complete food instruction.
+
+Example:
 SE ON 2 TST (BROWN)
 
 must be interpreted as:
-
 Scrambled Egg on 2 Brown Toast
 
 In this pattern:
@@ -275,9 +304,10 @@ in this pattern.
 Numbers such as 1, 2 and 3 usually indicate quantity.
 A number by itself is NOT an unknown product code.
 
-Always try to understand the complete handwritten food phrase
-before deciding that individual parts are UNKNOWN.
+Never mistake handwritten T or any letter in TST for a separator.
 
+Always read the complete handwritten food phrase before deciding
+that individual parts are UNKNOWN.
 UNKNOWN RULES:
 
 First try to understand an unknown handwritten code using the

@@ -4,6 +4,7 @@ import os
 import base64
 import json
 import re
+import difflib
 
 app = Flask(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -305,6 +306,73 @@ def update_current_order(current_order, code, meaning):
 
 
 # ============================================================
+# FUZZY "DID YOU MEAN?" SUGGESTIONS
+# Handwriting OCR sometimes misreads a real known code (e.g. it
+# reads "Can" as "Gan", or "Bubble" as "Bubbbe"). Instead of
+# forcing staff to retype the full meaning every time, suggest
+# the closest known code so it can be confirmed with one tap.
+# ============================================================
+
+def suggest_correction(token, known_codes):
+    """
+    Return (matched_code, meaning) if `token` looks like a
+    misread of an existing known code, else None. Exact matches
+    are excluded (those are already resolved elsewhere).
+    """
+
+    token_clean = token.strip()
+
+    if not token_clean:
+        return None
+
+    # Single-letter codes (S, C, E, L, B...) are too short to fuzzy
+    # match safely — almost any 2-letter unknown shares a letter
+    # with one of them. Only fuzzy-match against codes with at
+    # least 2 characters.
+    lower_to_code = {
+        code.lower(): code
+        for code in known_codes.keys()
+        if len(code) >= 2
+    }
+
+    if token_clean.lower() in lower_to_code:
+        return None
+
+    matches = difflib.get_close_matches(
+        token_clean.lower(),
+        list(lower_to_code.keys()),
+        n=1,
+        cutoff=0.6
+    )
+
+    if not matches:
+        return None
+
+    matched_code = lower_to_code[matches[0]]
+    return matched_code, known_codes[matched_code]
+
+
+def build_unknown_suggestions(unknowns, known_codes):
+    """
+    Turn a plain list of unknown code strings into the richer
+    structure the template needs to show "Did you mean X?".
+    """
+
+    suggestions = []
+
+    for token in unknowns:
+        match = suggest_correction(token, known_codes)
+
+        suggestions.append({
+            "code": token,
+            "suggested_code": match[0] if match else None,
+            "suggested_meaning": match[1] if match else None
+        })
+
+    return suggestions
+
+
+# ============================================================
 # HTML
 # ============================================================
 
@@ -489,13 +557,35 @@ Teach me what each one means.
 </p>
 
 
-{% for code in unknowns %}
+{% for item in unknowns %}
 
 <div class="unknown-box">
 
-<strong>{{ code }}</strong>
+<strong>{{ item.code }}</strong>
 
-<br><br>
+{% if item.suggested_meaning %}
+
+<p class="help">
+Did you mean <strong>{{ item.suggested_code }}</strong>
+({{ item.suggested_meaning }})?
+</p>
+
+<form method="POST" style="margin-bottom: 10px;">
+
+<input type="hidden" name="action" value="learn">
+<input type="hidden" name="code" value="{{ item.code }}">
+<input type="hidden" name="current_order" value="{{ result }}">
+<input type="hidden" name="meaning" value="{{ item.suggested_meaning }}">
+
+<button type="submit" class="main-button">
+Yes, same as {{ item.suggested_code }}
+</button>
+
+</form>
+
+{% endif %}
+
+<br>
 
 <form method="POST">
 
@@ -507,7 +597,7 @@ value="learn">
 <input
 type="hidden"
 name="code"
-value="{{ code }}">
+value="{{ item.code }}">
 
 <input
 type="hidden"
@@ -517,7 +607,7 @@ value="{{ result }}">
 <input
 type="text"
 name="meaning"
-placeholder="What does {{ code }} mean?"
+placeholder="What does {{ item.code }} mean?"
 required>
 
 <button
@@ -614,6 +704,19 @@ written, including the last one. "L . Can . SW" must keep all
 three tokens — do not drop the final SW.
 
 ==================================================
+LETTER-FOR-LETTER FIDELITY FOR SHORT CODES
+==================================================
+
+Short handwritten codes (1-3 letters, or all-caps abbreviations)
+must be transcribed exactly as the letters appear, even if they
+don't spell a real word. Do NOT silently "autocorrect" or expand
+a short code into a full dictionary word — e.g. do not turn "L"
+into "Latte", and do not turn "Can" into any other word just
+because it resembles one. If a letter is ambiguous, transcribe
+your best single reading of the actual strokes, not a guess at
+what word it "should" be.
+
+==================================================
 TABLE NUMBER
 ==================================================
 
@@ -687,8 +790,9 @@ YOUR JOB
 For EACH section, decide:
 
 1. "type": "drink" if the section is a short list of drink
-   codes (usually separated by dots, slashes, or commas, e.g.
-   "L . Can . SW"). Otherwise "food".
+   codes separated by dots, slashes, or commas — whether or not
+   there are spaces around the separator (e.g. both "L . Can . SW"
+   and "L.Can.SW" are drink lists). Otherwise "food".
 
 2. "raw_text": copy the section's text back out exactly as
    given, unmodified, preserving any line breaks.
@@ -799,6 +903,43 @@ def build_classification_schema(n_sections):
 
 
 # ============================================================
+# DRINK-LIST DETECTION — deterministic, done in Python.
+# The AI sometimes fails to notice that a line like "L.Can.SW"
+# (dots with no spaces) is a drink list, and lumps it into
+# ITEMS as one blob instead of three separate drinks. Rather
+# than trust the AI's own "type" judgement for lines that
+# obviously look like a dotted/slashed/comma code list, detect
+# that shape ourselves and force it to be split correctly.
+# ============================================================
+
+def looks_like_drink_list(raw_text):
+    text = raw_text.strip()
+
+    if not text:
+        return False
+
+    # A modification line ("No Bubble -> FO") or a multi-line
+    # food item is never a drink list.
+    if "\n" in text or "->" in text or "\u2192" in text:
+        return False
+
+    parts = re.split(r"\s*(?:\.|/|\||,)\s*", text)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    if len(parts) < 2:
+        return False
+
+    for part in parts:
+        # Real drink codes/names are short (1-2 words, e.g. "Can",
+        # "Black Coffee"). A long phrase means this probably isn't
+        # a simple dotted code list.
+        if len(part.split()) > 2 or len(part) > 15:
+            return False
+
+    return parts
+
+
+# ============================================================
 # BUILD THE FINAL ORDER — deterministic, done in Python.
 # The AI never gets to decide what a known code means; it only
 # flagged which tokens are shorthand. This is what fixes the
@@ -835,12 +976,20 @@ def build_final_order(sections, table, known_codes):
         if not raw_text:
             continue
 
+        # Override the AI's classification whenever the raw text is
+        # unmistakably a dotted/slashed/comma-separated code list,
+        # regardless of whether spaces surround the separators.
+        forced_drink_codes = looks_like_drink_list(raw_text)
+
+        if forced_drink_codes:
+            sec_type = "drink"
+
         if sec_type == "drink":
-            codes = section.get("drink_codes") or []
+            codes = forced_drink_codes or section.get("drink_codes") or []
 
             if not codes:
-                # Safety net in case the model left this empty —
-                # split the raw text ourselves rather than lose it.
+                # Safety net in case neither the heuristic nor the
+                # model produced a split — don't lose the text.
                 codes = re.split(r"\s*(?:\.|/|\||,)\s*", raw_text)
                 codes = [c.strip() for c in codes if c.strip()]
 
@@ -926,7 +1075,10 @@ def home():
                     meaning
                 )
 
-                unknowns = get_unknowns(result)
+                unknowns = build_unknown_suggestions(
+                    get_unknowns(result),
+                    load_codes()
+                )
 
                 saved = (
                     code
@@ -1084,9 +1236,14 @@ def home():
 
                                 sections_out = fixed
 
-                            result, unknowns = build_final_order(
+                            result, raw_unknowns = build_final_order(
                                 sections_out,
                                 table,
+                                codes
+                            )
+
+                            unknowns = build_unknown_suggestions(
+                                raw_unknowns,
                                 codes
                             )
 
@@ -1104,9 +1261,14 @@ def home():
                                 for s in sections_raw
                             ]
 
-                            result, unknowns = build_final_order(
+                            result, raw_unknowns = build_final_order(
                                 sections_out,
                                 table,
+                                codes
+                            )
+
+                            unknowns = build_unknown_suggestions(
+                                raw_unknowns,
                                 codes
                             )
 

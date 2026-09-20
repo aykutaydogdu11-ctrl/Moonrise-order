@@ -3,6 +3,7 @@ from openai import OpenAI
 import os
 import base64
 import json
+import re
 from datetime import datetime
 
 app = Flask(__name__)
@@ -31,9 +32,37 @@ DEFAULT_CODES = {
     "Bubble": "Bubble",
 
     # Exact combined shorthand.
-    # Because this exact code is saved here,
-    # its dots do NOT separate different products.
     "S.E.PE": "Sausage, Egg, Poached Egg"
+}
+
+
+# ============================================================
+# NORMAL WORDS THAT ARE NOT UNKNOWN CODES
+# ============================================================
+
+NORMAL_WORDS = {
+    "chips",
+    "cheese",
+    "toast",
+    "brown",
+    "white",
+    "beans",
+    "mushroom",
+    "tomato",
+    "tomatoes",
+    "bread",
+    "butter",
+    "salad",
+    "milk",
+    "tea",
+    "coffee",
+    "water",
+    "juice",
+    "egg",
+    "eggs",
+    "bacon",
+    "sausage",
+    "latte"
 }
 
 
@@ -114,8 +143,6 @@ def save_correction(original, corrected):
     original = original.strip()
     corrected = corrected.strip()
 
-    # If exactly the same correction already exists,
-    # increase its counter instead of saving a duplicate.
     for correction in corrections:
 
         if (
@@ -150,7 +177,6 @@ def save_correction(original, corrected):
         "last_seen": datetime.now().isoformat(timespec="seconds")
     })
 
-    # Keep the latest 100 corrections.
     corrections = corrections[-100:]
 
     with open(CORRECTIONS_FILE, "w") as f:
@@ -170,7 +196,6 @@ def corrections_for_prompt():
     if not corrections:
         return "No previous corrected orders yet."
 
-    # Only send the latest 20 examples to the AI.
     recent = corrections[-20:]
 
     blocks = []
@@ -193,62 +218,185 @@ HUMAN CORRECTED IT TO:
 
 
 # ============================================================
+# UNKNOWN HELPERS
+# ============================================================
+
+def clean_unknown_code(code):
+
+    code = code.strip()
+    code = code.lstrip("-• ").strip()
+
+    # Remove accidental quantity at beginning:
+    # "2 Cap" -> "Cap"
+    code = re.sub(
+        r"^\d+\s*[xX]?\s*",
+        "",
+        code
+    ).strip()
+
+    return code
+
+
+def split_unknown_code(code, known_codes):
+
+    """
+    Safety layer.
+
+    If the AI accidentally returns:
+
+        Cap.SW
+
+    under UNKNOWN, split it into:
+
+        Cap
+        SW
+
+    UNLESS Cap.SW itself is an exact learned code.
+    """
+
+    code = clean_unknown_code(code)
+
+    if not code:
+        return []
+
+    # Exact learned combined code must stay together.
+    if code in known_codes:
+        return [code]
+
+    # Split on dot, slash, pipe or comma.
+    parts = re.split(
+        r"\s*[./|,]\s*",
+        code
+    )
+
+    parts = [
+        clean_unknown_code(part)
+        for part in parts
+        if clean_unknown_code(part)
+    ]
+
+    if len(parts) > 1:
+        return parts
+
+    return [code]
+
+
+def should_be_unknown(code, known_codes):
+
+    code = code.strip()
+
+    if not code:
+        return False
+
+    if code.lower() in [
+        "none",
+        "n/a",
+        "unknown"
+    ]:
+        return False
+
+    # Known code
+    if code in known_codes:
+        return False
+
+    # Normal English food word
+    if code.lower() in NORMAL_WORDS:
+        return False
+
+    # Just a number
+    if code.isdigit():
+        return False
+
+    return True
+
+
+# ============================================================
 # FIND UNKNOWN CODES FROM AI RESULT
 # ============================================================
 
 def get_unknowns(result):
 
+    known_codes = load_codes()
+
     unknowns = []
 
     lines = result.splitlines()
 
-    for i, line in enumerate(lines):
+    inside_unknown = False
+
+    for line in lines:
 
         stripped = line.strip()
 
         if stripped.upper() == "UNKNOWN:":
+            inside_unknown = True
+            continue
 
-            for next_line in lines[i + 1:]:
+        if stripped.upper().startswith("UNKNOWN:"):
 
-                code = next_line.strip()
-
-                if not code:
-                    continue
-
-                # Another section has started.
-                if code.upper().endswith(":"):
-                    break
-
-                if code.lower() in [
-                    "none",
-                    "n/a",
-                    "unknown"
-                ]:
-                    break
-
-                code = code.lstrip("-• ").strip()
-
-                if code and code not in unknowns:
-                    unknowns.append(code)
-
-        elif stripped.upper().startswith("UNKNOWN:"):
+            inside_unknown = True
 
             value = stripped.split(":", 1)[1].strip()
 
-            if (
-                value
-                and
-                value.lower()
-                not in ["none", "n/a", "unknown"]
-            ):
+            if value:
 
-                for code in value.split(","):
+                candidates = split_unknown_code(
+                    value,
+                    known_codes
+                )
 
-                    code = code.strip()
-                    code = code.lstrip("-• ").strip()
+                for candidate in candidates:
 
-                    if code and code not in unknowns:
-                        unknowns.append(code)
+                    if (
+                        should_be_unknown(
+                            candidate,
+                            known_codes
+                        )
+                        and
+                        candidate not in unknowns
+                    ):
+                        unknowns.append(candidate)
+
+            continue
+
+        # Another main section starts
+        if (
+            inside_unknown
+            and
+            stripped.endswith(":")
+            and
+            stripped.upper() != "UNKNOWN:"
+        ):
+            inside_unknown = False
+
+        if inside_unknown:
+
+            if not stripped:
+                continue
+
+            if stripped.lower() in [
+                "none",
+                "n/a",
+                "unknown"
+            ]:
+                continue
+
+            candidates = split_unknown_code(
+                stripped,
+                known_codes
+            )
+
+            for candidate in candidates:
+
+                if (
+                    should_be_unknown(
+                        candidate,
+                        known_codes
+                    )
+                    and
+                    candidate not in unknowns
+                ):
+                    unknowns.append(candidate)
 
     return unknowns
 
@@ -648,15 +796,18 @@ def home():
                     # ========================================
 
                     prompt = f"""
-You read handwritten cafe orders for Moonrise.
+You are reading handwritten cafe order tickets
+for Moonrise.
 
-Your job is to accurately read the handwriting,
-identify each separate product, and use Moonrise's
-learned shorthand codes.
+Accuracy is more important than guessing.
 
-Do NOT invent products.
+Read the physical handwriting first.
 
-Do NOT silently remove readable handwriting.
+Then interpret Moonrise shorthand.
+
+NEVER invent a product.
+
+NEVER silently remove readable handwriting.
 
 
 ==================================================
@@ -666,136 +817,206 @@ KNOWN MOONRISE CODES
 {code_text}
 
 
-Known codes have priority over guesses.
+The saved codes above are authoritative.
+
+If a shorthand exactly matches a saved code,
+use its saved meaning.
 
 
 ==================================================
-VERY IMPORTANT DOT SEPARATOR RULE
+CRITICAL: PRODUCT SEPARATORS
 ==================================================
 
-A dot "." is a PRODUCT SEPARATOR by default.
+Handwritten punctuation is used to separate
+products.
 
-Every readable section between dots must first be
-treated as a separate product or shorthand code.
+These can all act as separators:
 
-For example:
+.
+/
+|
+commas
+clear gaps between shorthand codes
+
+
+A separator normally means:
+
+THE PRODUCT BEFORE IT AND THE PRODUCT AFTER IT
+ARE DIFFERENT PRODUCTS.
+
+
+Example:
 
 L . Cap . SW
 
-MUST be read as THREE separate codes:
+means THREE products:
 
 L
 Cap
 SW
 
-Never combine Cap and SW.
 
-Never output:
+It does NOT mean:
 
+L
 Cap.SW
 
-unless the exact complete code "Cap.SW" exists
-in KNOWN MOONRISE CODES.
+
+==================================================
+VERY IMPORTANT EXAMPLE: QUANTITY + SEPARATORS
+==================================================
+
+If handwriting says:
+
+2 Cap.SW
+
+or:
+
+2 Cap . SW
+
+read this as TWO DIFFERENT PRODUCTS:
+
+2 Cap
+2 SW
 
 
-If L is known and Cap and SW are unknown:
+The leading quantity 2 applies to BOTH products
+when they are written as a grouped pair like this.
 
-L must still be interpreted using its known meaning.
 
-Cap must remain Cap.
+DO NOT output:
 
-SW must remain SW.
+2 Cap.SW
 
-UNKNOWN must then contain:
+DO NOT treat Cap.SW as one unknown code.
+
+DO NOT ask the human:
+
+"What does Cap.SW mean?"
+
+
+Instead, if Cap and SW are not known:
+
+preserve:
+
+2 Cap
+2 SW
+
+and UNKNOWN must be:
 
 Cap
 SW
 
 
-Another example:
+==================================================
+MORE QUANTITY EXAMPLES
+==================================================
 
-B . E . BB . Chips
+2 C.BC
 
-MUST first be read as FOUR separate sections:
+means:
 
-B
-E
-BB
-Chips
-
-Do NOT merge:
-
-B with E
-E with BB
-BB with Chips
-
-or any other sections.
+2 White Coffee
+2 Black Coffee
 
 
-If B and E are known and BB is unknown:
+3 Cap.SW
 
-interpret B and E normally.
+means:
 
-Keep BB exactly as BB.
+3 Cap
+3 SW
 
-"Chips" is an ordinary readable food word and
-does not need to be treated as shorthand merely
-because it is not in the code dictionary.
 
-UNKNOWN should contain:
+2 B.E
 
-BB
+normally means:
+
+2 Bacon
+2 Egg
+
+
+However, an EXACT combined shorthand already
+saved in KNOWN MOONRISE CODES remains a combined
+shorthand.
 
 
 ==================================================
-ONLY EXCEPTION TO THE DOT RULE
+EXACT SAVED COMBINED CODE EXCEPTION
 ==================================================
 
-A sequence containing dots may be treated as a
-combined Moonrise shorthand ONLY when the EXACT
-complete sequence already exists in:
+There is only one reason to keep dot-separated
+shorthand together:
 
-KNOWN MOONRISE CODES.
+THE EXACT FULL STRING EXISTS IN KNOWN MOONRISE
+CODES.
+
 
 For example:
 
 S.E.PE
 
-exists as an exact known Moonrise code.
+is an exact saved code.
 
-Therefore:
-
-S.E.PE
-
-can use its saved meaning:
-
-Sausage
-Egg
-Poached Egg
+Therefore it can use its saved meaning.
 
 
-But:
+But if:
 
 Cap.SW
 
-does NOT become one code unless the exact complete
-text:
+is NOT an exact saved code:
 
-Cap.SW
+YOU MUST SPLIT IT:
 
-has previously been saved as a known Moonrise code.
+Cap
+SW
 
 
-CRITICAL:
+Never invent a new combined shorthand.
 
-Do NOT invent combined shorthand.
 
-Do NOT decide that two unknown codes form one code.
+==================================================
+FOOD LINES ALSO USE SEPARATORS
+==================================================
 
-Unknown codes on opposite sides of a dot are
-ALWAYS separate unknown codes unless their exact
-combined sequence already exists in KNOWN
-MOONRISE CODES.
+For example:
+
+B.F . BB . Chips
+
+must initially be understood as THREE separate
+readable components:
+
+B.F
+BB
+Chips
+
+
+Do NOT produce:
+
+B.F.BB.Chips
+
+
+Do NOT produce one UNKNOWN called:
+
+B.F / BB / Chips
+
+
+Each shorthand candidate must be considered
+independently.
+
+
+If B.F and BB are unknown:
+
+UNKNOWN:
+
+B.F
+BB
+
+
+Chips is an ordinary food word.
+
+Therefore Chips must NOT be put into UNKNOWN.
 
 
 ==================================================
@@ -806,24 +1027,21 @@ C = White Coffee
 BC = Black Coffee
 L = Latte
 
-Do NOT change C into BC.
+PE = Poached Egg
+SE = Scrambled Egg
+S = Sausage
+E = Egg
+B = Bacon
 
-PE = Poached Egg.
-
-SE = Scrambled Egg.
-
-S = Sausage.
-
-E = Egg.
-
-B = Bacon.
+Do not change one known code into another.
 
 
 ==================================================
 QUANTITIES
 ==================================================
 
-Numbers can indicate quantities.
+Numbers indicate quantities when written with
+products.
 
 Examples:
 
@@ -834,35 +1052,58 @@ Examples:
 L x2 = 2 Lattes
 
 
-Numbers are NOT unknown product codes.
+A number itself is NOT an unknown shorthand.
+
+
+When ONE quantity is written before several
+dot-separated products on the same handwritten
+group, apply that quantity to each product unless
+the handwriting clearly indicates otherwise.
+
+
+Example:
+
+2 Cap.SW
+
+=
+
+2 Cap
+2 SW
 
 
 ==================================================
 NORMAL FOOD WORDS
 ==================================================
 
-Normal readable food words do not automatically
-become UNKNOWN codes.
+Normal readable English food words are NOT
+unknown shorthand codes.
 
-Examples include words such as:
+Examples:
 
 Chips
 Cheese
 Toast
 Brown
 White
+Beans
+Mushroom
+Tomato
+Bread
+Butter
+Salad
 
-If a normal food word is clearly readable,
-preserve the word.
+
+Preserve these as ordinary words.
 
 
 ==================================================
 FOOD PHRASES
 ==================================================
 
-Spaces can form one complete food instruction.
+Some spaces form a single food instruction rather
+than separate products.
 
-For example:
+Example:
 
 SE ON 2 TST (BROWN)
 
@@ -872,18 +1113,14 @@ Scrambled Egg on 2 Brown Toast
 
 
 SE = Scrambled Egg
-
-ON = connector word
-
+ON = connector
 2 = quantity
-
 TST = Toast
+BROWN = Brown
 
-BROWN = Brown Toast
 
-
-Do not put ON, quantity, TST or BROWN into UNKNOWN
-when they clearly form this normal food phrase.
+Do not list connector words or quantities under
+UNKNOWN.
 
 
 Example:
@@ -896,7 +1133,7 @@ Cheese on 2 Toast
 
 
 ==================================================
-SET MENUS
+SET MENUS AND MODIFICATIONS
 ==================================================
 
 Hope 1
@@ -906,8 +1143,9 @@ Hope 4
 
 are set-menu items.
 
-A modification written directly underneath a
-set menu belongs to that set menu.
+
+A handwritten instruction immediately underneath
+a Hope item belongs to that Hope item.
 
 
 Example:
@@ -915,13 +1153,23 @@ Example:
 Hope 4
 No E -> B
 
-must remain together:
+MUST remain:
 
 Hope 4
 No E -> B
 
 
-Do NOT turn the modification into another item.
+It is ONE menu item with a modification.
+
+
+DO NOT turn:
+
+No E -> B
+
+into a separate order.
+
+
+The arrow -> means a substitution/modification.
 
 
 ==================================================
@@ -930,9 +1178,9 @@ TABLE NUMBER
 
 A circled number is normally the table number.
 
-For example:
+Example:
 
-a circled 13
+circled 13
 
 means:
 
@@ -940,88 +1188,87 @@ TABLE:
 13
 
 
+Do not interpret the circled table number as a
+quantity or product.
+
+
 ==================================================
-UNKNOWN CODE RULES
+UNKNOWN CODES
 ==================================================
 
-If shorthand is not in KNOWN MOONRISE CODES
-and its meaning cannot safely be established:
+If a shorthand code is not known and you cannot
+safely determine its meaning:
 
 DO NOT GUESS.
 
-Keep the exact shorthand visible in the order.
+Keep the shorthand exactly as read.
 
-Also list it under UNKNOWN.
-
-
-Most importantly:
-
-Each unknown code must be listed SEPARATELY.
+Then put it under UNKNOWN.
 
 
-For example:
+CRITICAL:
 
-Cap . SW
+Each unknown shorthand must appear on its own
+line.
 
-must produce:
+
+Correct:
 
 UNKNOWN:
 Cap
 SW
 
 
-NEVER:
+Incorrect:
 
 UNKNOWN:
 Cap.SW
 
 
-Another example:
-
-B . E . BB . Chips
-
-if B and E are known and BB is unknown:
+Incorrect:
 
 UNKNOWN:
-BB
+Cap / SW
 
 
-Do NOT put "Chips" into UNKNOWN simply because
-it is an ordinary food word rather than a saved
-short code.
+Incorrect:
+
+UNKNOWN:
+2 Cap.SW
 
 
-Do NOT put these into UNKNOWN:
+Quantities must NOT be included in the unknown
+code name.
 
-quantities
-table numbers
-connector words
-ordinary clearly readable food words
-complete food instructions
+
+Therefore:
+
+2 Cap
+
+should produce unknown code:
+
+Cap
+
+NOT:
+
+2 Cap
 
 
 ==================================================
-DO NOT LOSE PRODUCTS
+DO NOT LOSE KNOWN PRODUCTS
 ==================================================
 
-Every readable section separated by a dot must
-appear somewhere in the interpreted order.
-
-Never silently skip a section.
-
-Never allow an unknown section to cause a known
-section next to it to disappear.
+Unknown handwriting beside a known product must
+never cause the known product to disappear.
 
 
 Example:
 
 L . Cap . SW
 
-If Cap and SW are unknown, L must STILL appear.
+must preserve all three:
 
-All three sections must survive:
-
-L
+Latte
 Cap
 SW
 
@@ -1030,45 +1277,40 @@ SW
 PREVIOUS HUMAN CORRECTIONS
 ==================================================
 
-The following are previous corrections made by
-Moonrise staff.
-
-Use these examples to better understand Moonrise
-orders.
-
-A HUMAN CORRECTION is more reliable than the old
-AI interpretation.
-
-However:
-
-Do NOT blindly copy a previous order.
-
-Only use a previous correction when the current
-handwriting supports the same interpretation.
-
+These are examples previously corrected by
+Moonrise staff:
 
 {correction_text}
+
+
+Human corrections are useful examples.
+
+But do not blindly copy an old order.
+
+The CURRENT IMAGE always has priority.
 
 
 ==================================================
 OUTPUT FORMAT
 ==================================================
 
-Return exactly these sections:
+Return EXACTLY these four sections:
 
 
 DRINKS:
 
-List only drinks here.
+Put drinks here.
 
-Write each separate drink on its own line.
+Each different drink/product must appear on its
+own line.
 
-Known drink codes must be converted to their
-known product names.
+Include quantities.
 
-If an unknown shorthand appears on a drink line,
-preserve it as a separate product and also put
-the shorthand under UNKNOWN.
+Example:
+
+2 Latte
+2 Cap
+2 SW
 
 
 ITEMS:
@@ -1081,14 +1323,13 @@ Example:
    Egg
    Poached Egg
 
-2- Hope 1
-   No S -> B
+2- Hope 4
+   No E -> B
 
 3- Cheese on 2 Toast
 
 
-Keep modifications directly underneath the item
-they belong to.
+Keep modifications underneath their parent item.
 
 
 TABLE:
@@ -1098,40 +1339,66 @@ Write only the table number.
 
 UNKNOWN:
 
-Write each unknown shorthand code on a
-SEPARATE LINE.
+Each unknown shorthand on its OWN LINE.
 
-If there are no unknown codes, write:
+Example:
+
+Cap
+SW
+BB
+
+
+If there are no unknown shorthand codes:
 
 None
 
 
 ==================================================
-FINAL CHECK
+MANDATORY FINAL VISUAL CHECK
 ==================================================
 
-Before answering:
+Before returning the answer:
 
-Look at the image again.
+1. Look at the actual image again.
 
-Check every handwritten line.
+2. Check every handwritten line.
 
-Check every dot-separated section.
+3. Check every dot, slash and separator.
 
-If a dot-separated sequence is NOT an exact known
-combined Moonrise code, split it into separate
-sections.
+4. Check whether any quantity appears before a
+   group of products.
 
-Make sure no readable product disappeared.
+5. If you see something similar to:
 
-Make sure unknown codes were not merged together.
+   2 Cap.SW
 
-Make sure each unknown shorthand appears
-separately under UNKNOWN.
+   make sure you have NOT returned Cap.SW as one
+   product.
 
-Do not guess unknown shorthand.
+6. Unless Cap.SW exists EXACTLY in the saved code
+   dictionary, it must become:
 
-Do not invent products.
+   2 Cap
+   2 SW
+
+7. Check food lines separately.
+
+8. If you see:
+
+   B.F . BB . Chips
+
+   do NOT merge all three.
+
+9. Keep Hope menu modifications underneath the
+   Hope item.
+
+10. Make sure no readable product disappeared.
+
+11. Make sure UNKNOWN contains individual codes,
+    never a collection of codes joined by dots,
+    slashes or commas.
+
+12. Do not guess.
 """
 
 
@@ -1204,4 +1471,4 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=10000
-        )
+                      )

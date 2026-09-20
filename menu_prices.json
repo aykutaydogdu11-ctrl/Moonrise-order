@@ -1,0 +1,239 @@
+{
+  "breakfast": {
+    "note": "All served with tea or coffee. Only 1 item changeable from set menu.",
+    "items": {
+      "Hope 1": {"desc": "Egg, bacon, sausage, chips, beans & toast", "price": 7.50},
+      "Hope 2": {"desc": "Egg, bacon, sausage, beans, bubble & toast", "price": 8.20},
+      "Hope 3": {"desc": "Egg, bacon, sausage, beans, mushroom & toast", "price": 8.20},
+      "Hope 4": {"desc": "Egg, bacon, sausage, beans, black pudding, sautee potatoes & toast", "price": 8.80},
+      "Full English Breakfast": {"desc": "2 eggs, bacon, sausage, beans, mushroom, hash brown & toast", "price": 9.50},
+      "Chefs Breakfast": {"desc": "Egg, bacon, beans, 2 frankfurter, chips, tomatoes & toast", "price": 9.50},
+      "Mega Breakfast": {"desc": "2 eggs, bacon, 2 sausages, tomatoes, hash brown, beans & toast", "price": 9.00},
+      "Hope Special": {"desc": "Egg, bacon, sausage, tomatoes, 2 burgers, onion rings & toast", "price": 10.00},
+      "Hope Grill": {"desc": "2 eggs, 2 burger, fried onions, chips, beans & toast", "price": 9.20},
+      "Big Breakfast": {"desc": "2 eggs, bacon, 2 sausages, beans, mushrooms, tomatoes & toast", "price": 9.50},
+      "Helen Harty Breakfast": {"desc": "Eggs, bacon, sausages, beans, mushrooms, tomatoes, sautee potatoes, black pudding & toast", "price": 10.90},
+      "Liver Breakfast": {"desc": "Egg, bacon, sausage, beans, liver, bubble & toast", "price": 9.80},
+      "Scrambled Sunrise": {"desc": "3 scrambled egg, tomatoes, beans, mushroom & toast", "price": 8.50},
+      "Vegetarian Breakfast": {"desc": "Egg, tomatoes, sautee potatoes, beans, mushroom, veggie sausage & toast", "price": 8.80},
+      "Egg Benedict": {"desc": "2 poached eggs on English muffins with bacon & hollandaise sauce & jam", "price": 8.50},
+      "Egg Royal": {"desc": "2 poached eggs on English muffins with smoked salmon, hollandaise sauce & jam", "price": 9.00},
+      "Mediterranean Breakfast": {"desc": "Grilled halloumi, egg, filo pastry with parsley & feta, grilled spicy sausage, yoghurt harissa, jam & toast", "price": 10.90},
+      "Turkish Eggs": {"desc": "Garlic yoghurt, poached egg, browned butter, red flakes pepper, diced spicy beef sausage, hummus & 2 slice crusty bread", "price": 10.90},
+      "Pancake Breakfast": {"desc": "2 pancakes, 2 eggs, bacon, crushed cranberry & honey", "price": 9.50},
+      "Avocado Breakfast": {"desc": "Crushed avocado on sourdough with poached smoked salmon & mushroom", "price": 12.00}
+    }
+  },
+
+  "extra_toppings": {
+    "note": "Add-ons to build/modify a breakfast",
+    "items": {
+      "Egg": 1.20, "Sausage": 1.50, "Halloumi Cheese": 3.00, "Smoked Salmon": 4.00,
+      "Liver": 3.50, "Hash Browns": 1.50, "Mushrooms": 1.50, "Tomato": 1.50,
+      "Mashed Potatoes": 2.50, "Chips": 3.00, "Cheesy Chips": 4.00, "Rice": 3.00,
+      "Fried Onions": 1.50, "Coleslaw": 1.50, "Curly Fries": 4.00, "Bacon": 1.50,
+      "Baked Beans": 1.20, "Scrambled Egg": 2.50, "Onion Rings": 2.00,
+      "Black Pudding": 1.80, "Veggie Sausage": 1.80, "Bubble": 2.00, "Sautee Potatoes": 4.00
+    }
+  },
+
+  "omelettes": {
+    "note": "Served with chips and salad. All made with 3 eggs.",
+    "items": {
+      "Plain": 6.00, "Cheese": 7.20, "Cheese & Ham": 8.50, "Cheese, Ham & Mushroom": 9.00,
+      "Mediterranean": {"desc": "Halloumi, pastourma & tomato", "price": 9.00},
+      "Vegetarian Mix": {"desc": "Cheese, sweetcorn, mushroom & onion", "price": 9.00},
+      "Wake Me Up Ommy": {"desc": "Bacon, sausage & mushroom", "price": 9.20},
+      "Chicken, Cheese & Mushroom": 9.50,
+      "Spanish": {"desc": "Peas, tomato, mushroom, onion & cheese", "price": 8.50},
+      "Spinach": {"desc": "Grilled peppers, spinach, cheese & red onion", "price": 9.50}
+    }
+  },
+
+  "on_toast": {
+    "items": {
+      "2 Toast": 1.50, "2 Toast Jam": 2.00, "2 Toast Marmite": 2.00, "2 Crusty Toast": 1.50,
+      "Toasted Tea Cake": 3.00, "Scrambled Eggs on 2 Toast": 4.90, "2 Poached Eggs on 2 Toast": 4.90,
+      "Cheese on 2 Toast": 4.50, "Mushroom on 2 Toast": 4.50, "Beans on 2 Toast": 4.50,
+      "2 Eggs on 2 Toast": 4.30,
+      "Mix Scrambled Egg on 2 Toast": {"desc": "Scrambled egg, bacon, sausage, cherry tomato, chilli flakes", "price": 5.90}
+    }
+  },
+
+  "small_breakfast": {
+    "items": {
+      "Egg & Bacon": 3.00, "Egg, Bacon & Chips": 5.00, "Egg, Bacon & Beans": 5.00,
+      "Egg, Sausage & Chips": 5.00, "Egg, Bacon, Beans, Hash Brown": 6.60, "3 Ham, 2 Eggs & Chips": 6.50
+    }
+  },
+
+  "soups": {
+    "note": "Served with roll, bread or toast",
+    "items": {"Tomato": 4.50, "Mushroom": 4.50, "Chicken": 4.50, "Vegetables": 4.50}
+  },
+
+  "sandwiches": {
+    "note": "Toasted +30p. Price columns: Roll / Sandwich / Crusty / Bag",
+    "items": {
+      "Bacon": [3.30, 3.50, 4.00, 4.50],
+      "Bacon & Egg": [4.00, 4.30, 4.50, 5.00],
+      "Sausage": [3.30, 3.50, 4.00, 4.50],
+      "Bacon, Egg & Cheese": [4.20, 4.70, 4.90, 5.50],
+      "Bacon, Egg, Mushroom": [4.20, 4.70, 4.90, 5.50],
+      "Bacon & Sausage": [4.00, 4.50, 4.90, 5.50],
+      "Bacon, Sausage & Cheese": [4.20, 4.70, 5.00, 5.70],
+      "BLT": [3.50, 3.80, 4.20, 4.60],
+      "Bacon, Sausage & Hash Brown": [4.50, 4.80, 5.20, 5.70],
+      "Fish Finger": [3.50, 3.80, 4.30, 5.00],
+      "Cheddar or Greek Feta": [3.30, 3.80, 4.30, 4.80],
+      "Ham": [3.30, 3.80, 4.30, 4.80],
+      "Ham, Cheese or Egg": [4.00, 4.20, 4.50, 5.00],
+      "Tuna Mayo": [3.50, 3.90, 4.50, 5.00],
+      "Tuna Mayo & Sweetcorn": [3.50, 3.90, 4.50, 5.00],
+      "Tuna Mayo, Cheese": [4.00, 4.20, 4.70, 5.30],
+      "Chicken Mayo or Plain": [3.50, 4.00, 4.50, 5.00],
+      "Chicken Mayo & Bacon": [4.00, 4.50, 5.00, 5.80],
+      "Chicken Mayo, Bacon & Hash Brown": [4.50, 4.90, 5.20, 6.20],
+      "Chicken Mayo, Bacon & Avocado": [4.50, 4.90, 5.20, 6.20],
+      "Chicken Tikka": [3.50, 4.00, 4.50, 5.00],
+      "Egg (fried, boiled or mayo)": [3.00, 3.50, 3.80, 4.50],
+      "Prawn Mayo": [3.80, 4.50, 5.00, 6.00],
+      "Crab Mayo": [3.50, 4.00, 4.30, 5.00],
+      "Smoked Salmon & Cream Cheese": [4.50, 5.00, 5.50, 6.70],
+      "Halloumi Grilled Cheese": [4.00, 4.70, 5.20, 5.70]
+    },
+    "baguettes": {
+      "Breakfast Baguette": {"desc": "Egg, bacon, sausage, mushroom, cheddar", "price": 7.30},
+      "Chicken Shish Baguette": {"desc": "Salad & mayo", "price": 7.50},
+      "Lamb Kofte Baguette": {"desc": "Salad & mayo", "price": 7.50}
+    }
+  },
+
+  "panini": {
+    "items": {
+      "Cheese & Tomato": 4.00, "Ham & Cheese": 5.00, "Tuna & Cheese": 5.00,
+      "Halloumi & Tomato": 5.50, "Bacon & Cheese": 5.00
+    }
+  },
+
+  "tortilla_wraps": {
+    "note": "All served with chips",
+    "items": {
+      "Hope Chicken": {"desc": "Grilled chicken fillet, salad & salsa dressing", "price": 8.00},
+      "Tuna Melt": {"desc": "Tuna, cheddar cheese & onions", "price": 8.00},
+      "Kofte": {"desc": "Grilled meat ball, roasted pepper & salad", "price": 8.00},
+      "Mediterranean": {"desc": "Grilled halloumi, tomato & fried onion", "price": 8.00},
+      "Peri Peri Chicken": {"desc": "Peri peri chicken, salad, cheese, chilli sauce & mayo", "price": 8.00},
+      "Mayer": {"desc": "Chicken mayo, sweetcorn & grilled halloumi", "price": 8.00}
+    }
+  },
+
+  "desserts": {
+    "items": {
+      "American Pancakes": 7.00, "Belgian Waffles": 7.00, "Apple Pie": 5.50,
+      "Cake": 5.00, "Ice Cream": 4.50
+    }
+  },
+
+  "hot_drinks": {
+    "items": {
+      "Black Coffee": 2.40, "Flat White": 2.70, "Cappuccino": 2.80, "Latte": 2.80,
+      "Chai Latte": 3.00, "Machiatto": 3.00, "Espresso": 2.40, "Hot Chocolate": 3.00,
+      "Hot Chocolate with cream": 3.30, "Tea": 1.60, "Earl Grey Tea": 1.70,
+      "Herbal Tea": 1.80, "Ice Latte": 3.00, "Milks (soya/oat/almond)": 0.50
+    }
+  },
+
+  "cold_drinks": {
+    "items": {
+      "Bottle Soft Drinks": 2.20, "Can Drinks": 1.70, "Orange Juice": 2.20,
+      "Apple Juice": 2.20, "Perrier Water": 2.00, "Oasis Summer Fruit": 2.20,
+      "Ribena": 2.20, "Water": 1.50
+    }
+  },
+
+  "milkshakes": {
+    "items": {
+      "Vanilla": 3.30, "Chocolate": 3.30, "Strawberry": 3.30, "Banana": 3.30,
+      "Chocolate Bar (mars/twix/kitkat/snickers/oreo)": 4.00,
+      "Smoothie (mix fruit/summer fruit/blueberry/mango)": 4.00
+    }
+  },
+
+  "main_courses": {
+    "items": {
+      "Lasagne Classico": 9.90, "Cypress Bowl": 9.00, "Penne Carbonara": 9.50,
+      "Spaghetti Bolognese": 8.70, "Shepherds Pie": 9.90, "Chilli Con Carne": 9.90,
+      "Chicken Curry": 9.50, "Chicken Kebab": 10.00, "Chicken Delight": 10.00,
+      "Creme De La Creme": 11.00, "Lemon Butterfly": 11.00, "Chicken Sautee": 11.50,
+      "Liver Mega": 10.00, "Mixed Grill": 12.50, "Gammon Steak": 9.00,
+      "Pork Chops": 9.00, "Sirloin Steak": 11.90, "Lamb Chops": 12.00, "Lamb Kofte": 10.00
+    }
+  },
+
+  "burgers": {
+    "items": {
+      "Beef Burger": 3.20,
+      "Cheese Burger": 3.50,
+      "Quarter Pounder": {"desc": "Cheese & salad", "price": 6.00},
+      "Half Pounder": {"desc": "Cheese & salad", "price": 8.50},
+      "Chicken Burger": 6.50,
+      "Veggie Burger": 6.00,
+      "Hope Incrediles": {"desc": "Bacon, egg, cheese & fried onions", "price": 8.50},
+      "Grilled Chicken Burger": {"desc": "Lean grilled chicken, mature cheddar, green salad, tomato, red onion", "price": 8.00},
+      "Chips": 3.00,
+      "Curly Fries": 4.00
+    }
+  },
+
+  "hope_roast_dinner": {
+    "note": "Served with roast potatoes, vegetables & Yorkshire pudding",
+    "items": {"Lamb": 10.90, "Beef": 10.90, "Chicken": 10.90, "Turkey": 10.90}
+  },
+
+  "salads": {
+    "items": {
+      "Grilled Chicken": {"desc": "Lemon & herb grilled chicken", "price": 9.90},
+      "Greek": {"desc": "Olives, feta cheese, avocado, dressing", "price": 8.90},
+      "Prawn Mayo": 8.50, "Prawn Cocktail": 8.50, "Tuna": 8.00, "Ham": 10.00,
+      "Halloumi": {"desc": "Grilled halloumi, mixed peppers, grilled aubergine, tahini dressing", "price": 10.00}
+    }
+  },
+
+  "fish_and_pies": {
+    "items": {
+      "Cod": {"desc": "Chips & peas", "price": 8.00},
+      "Scampi": {"desc": "Chips & peas", "price": 8.50},
+      "Chicken Nuggets": {"desc": "Chips & salad", "price": 8.00},
+      "Steak Kidney Pie": {"desc": "Chips & peas", "price": 8.00},
+      "Chicken Mushroom Pie": {"desc": "Chips & peas", "price": 8.00}
+    }
+  },
+
+  "healthy_options": {
+    "items": {"Hope's Granola Special": 6.00, "Organic Porridge": 6.00}
+  },
+
+  "jumbo_jacket_potatoes": {
+    "note": "Served with salad & coleslaw. Extra filling +1.50",
+    "items": {
+      "Magic": {"desc": "Melted cheese & beans", "price": 7.50},
+      "Hope Umy": {"desc": "Chicken mayo & bacon", "price": 8.20},
+      "Milano": {"desc": "Rich bolognese sauce & cheese", "price": 8.20},
+      "Oh My Hope": {"desc": "Curry or chilli con carne sauce & cheese", "price": 8.50},
+      "Fishers": {"desc": "Tuna mayo & melted cheese", "price": 8.50},
+      "Prawn": {"desc": "Prawn mayo", "price": 8.50},
+      "Warm Man Farm": {"desc": "Farman farm, sausage, bacon, fried onion & melted cheese", "price": 8.50}
+    }
+  },
+
+  "childrens_meals": {
+    "note": "All served with a glass of fresh fruit juice",
+    "items": {
+      "Chicken Hope": {"desc": "Chicken nuggets, fries & baked beans", "price": 6.00},
+      "Captain's": {"desc": "Fish finger, fries & baked beans", "price": 6.00},
+      "Burger": {"desc": "Beef burger, fries & baked beans", "price": 6.00},
+      "Mamma Mia": {"desc": "Spaghetti bolognese", "price": 6.00}
+    }
+  }
+}

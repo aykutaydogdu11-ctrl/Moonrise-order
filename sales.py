@@ -32,11 +32,15 @@ def _save_sales(records):
         json.dump(records, f, indent=2, ensure_ascii=False)
 
 
-def record_sale(table, sale_items, total):
+def record_sale(table, sale_items, total, ingredient_counts=None):
     """
     sale_items: list of {"name","qty","unit_price","line_total"}
-    as produced by pricing.apply_pricing(). Appends one record —
-    does not touch existing history.
+    as produced by pricing.apply_pricing(). ingredient_counts:
+    {"Sausage": 2, ...} — stock-relevant counts combining both
+    standalone topping orders and ones implied by composite
+    dishes (e.g. a Sausage inside Hope 1), also from
+    pricing.apply_pricing(). Appends one record — does not touch
+    existing history.
     """
 
     records = load_sales()
@@ -45,6 +49,7 @@ def record_sale(table, sale_items, total):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "table": table or "",
         "items": sale_items,
+        "ingredients": ingredient_counts or {},
         "total": round(total, 2)
     })
 
@@ -89,10 +94,18 @@ def filter_since(records, cutoff):
 def summarize(records):
     """
     Returns {"item_counts": [(name, qty, revenue), ...] sorted by
+    qty desc, "ingredient_counts": [(name, qty), ...] sorted by
     qty desc, "revenue": total, "order_count": n}.
+    item_counts is what was actually sold/billed (Hope 1, Latte,
+    a standalone Sausage...). ingredient_counts is the underlying
+    stock-relevant total — it also folds in ingredients implied by
+    composite dishes (Hope 1 counts toward Sausage too), so it is
+    NOT the same numbers as item_counts and has no revenue column
+    (that ingredient wasn't billed separately).
     """
 
     item_counts = {}
+    ingredient_totals = {}
     revenue = 0.0
 
     for record in records:
@@ -109,6 +122,9 @@ def summarize(records):
             item_counts[name]["qty"] += qty
             item_counts[name]["revenue"] += line_total
 
+        for ing_name, ing_qty in (record.get("ingredients") or {}).items():
+            ingredient_totals[ing_name] = ingredient_totals.get(ing_name, 0) + ing_qty
+
     sorted_items = sorted(
         (
             (name, data["qty"], data["revenue"])
@@ -118,8 +134,15 @@ def summarize(records):
         reverse=True
     )
 
+    sorted_ingredients = sorted(
+        ingredient_totals.items(),
+        key=lambda t: t[1],
+        reverse=True
+    )
+
     return {
         "item_counts": sorted_items,
+        "ingredient_counts": sorted_ingredients,
         "revenue": revenue,
         "order_count": len(records)
     }

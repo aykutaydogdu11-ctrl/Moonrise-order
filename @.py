@@ -29,7 +29,7 @@ MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-nano")
 # ============================================================
 
 DEFAULT_DRINK_CODES = {
-    "C": "White Coffee",
+    "C": "Flat White",
     "BC": "Black Coffee",
     "L": "Latte",
     "Cap": "Cappuccino",
@@ -842,6 +842,41 @@ style="width:32%">
 
 <button type="submit" class="secondary" style="background:#eef0eb;color:#202a1f;border:1px solid #d9ddd5;">
 + Ürün Ekle
+</button>
+
+</form>
+
+
+<form method="POST" style="margin-top: 10px;">
+
+<input type="hidden" name="action" value="add_custom">
+<input type="hidden" name="base_order" value="{{ base_order }}">
+
+<select name="custom_section">
+<option value="drink">Drink</option>
+<option value="food">Food</option>
+</select>
+
+<input
+type="text"
+name="custom_name"
+placeholder="e.g. Mocha"
+style="width:25%">
+
+<input
+type="text"
+name="custom_price"
+placeholder="£ fiyat"
+style="width:18%">
+
+<span class="qty-stepper">
+<button type="button" onclick="stepQty('custom_qty', -1)">−</button>
+<input type="number" id="custom_qty" name="custom_qty" value="1" min="1" readonly>
+<button type="button" onclick="stepQty('custom_qty', 1)">+</button>
+</span>
+
+<button type="submit" class="secondary" style="background:#eef0eb;color:#202a1f;border:1px solid #d9ddd5;">
++ Özel Fiyat Ekle
 </button>
 
 </form>
@@ -1770,6 +1805,63 @@ def home():
                 saved = f"Added: {display}"
             else:
                 error = "Please enter an item to add."
+
+            unknowns = build_unknown_suggestions(
+                get_unknowns(base_order),
+                load_codes()
+            )
+
+            try:
+                result, _total, price_unknowns, sale_items, _ingredients = (
+                    pricing.apply_pricing(base_order)
+                )
+            except Exception as e:
+                result = base_order
+                error = (error + " " if error else "") + "Pricing step failed: " + str(e)
+
+
+        # ====================================================
+        # ADD A CUSTOM-PRICED ITEM (something not on the menu
+        # yet, e.g. "Mocha +50p") — teaches the price at the same
+        # time so it auto-prices next time this exact name is used.
+        # ====================================================
+
+        elif action == "add_custom":
+
+            base_order = request.form.get("base_order", "")
+            section_choice = request.form.get("custom_section", "drink")
+            custom_name = request.form.get("custom_name", "").strip()
+            price_str = request.form.get("custom_price", "").strip()
+
+            try:
+                qty_field = int(request.form.get("custom_qty", "1") or 1)
+            except ValueError:
+                qty_field = 1
+
+            try:
+                custom_price = float(price_str)
+            except ValueError:
+                custom_price = None
+
+            order = parse_order_text(base_order)
+
+            if custom_name and custom_price is not None:
+
+                pricing.save_learned_price(custom_name, custom_name, custom_price)
+
+                display = (
+                    f"{custom_name} x{qty_field}" if qty_field > 1 else custom_name
+                )
+
+                if section_choice == "drink":
+                    order["drinks"].append(display)
+                else:
+                    order["items"].append({"headline": display, "modifiers": []})
+
+                base_order = serialize_order(order)
+                saved = f"Added: {display} — £{custom_price:.2f} (taught)"
+            else:
+                error = "Please enter a name and a valid price."
 
             unknowns = build_unknown_suggestions(
                 get_unknowns(base_order),

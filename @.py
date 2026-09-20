@@ -398,6 +398,38 @@ def get_removable_lines(base_order):
     return options
 
 
+_QTY_DISPLAY_SUFFIX = re.compile(r"^(.*?)\s+x(\d+)$", re.IGNORECASE)
+
+
+def decrement_display_qty(label, by=1):
+    """
+    "Tea x2" minus 1 -> "Tea" (one removed, one left).
+    "Tea x3" minus 2 -> "Tea".
+    "Tea" (no quantity, implicit 1) minus 1 -> None (remove line).
+    Lets "Çıkar" take off a chosen number of units instead of
+    wiping out an entire "x2" line in one click.
+    """
+
+    m = _QTY_DISPLAY_SUFFIX.match(label.strip())
+
+    if m:
+        base = m.group(1).strip()
+        current_qty = int(m.group(2))
+    else:
+        base = label.strip()
+        current_qty = 1
+
+    new_qty = current_qty - max(by, 1)
+
+    if new_qty <= 0:
+        return None
+
+    if new_qty == 1:
+        return base
+
+    return f"{base} x{new_qty}"
+
+
 def update_current_order(current_order, code, meaning):
     """
     When staff teaches a code:
@@ -652,6 +684,42 @@ input[type="text"] {
     line-height: 1.4;
 }
 
+.qty-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    vertical-align: middle;
+}
+
+.qty-stepper button {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
+    background: #eef0eb;
+    color: #202a1f;
+    border: 1px solid #d9ddd5;
+}
+
+.qty-stepper button:first-child {
+    border-radius: 7px 0 0 7px;
+}
+
+.qty-stepper button:last-child {
+    border-radius: 0 7px 7px 0;
+}
+
+.qty-stepper input {
+    width: 36px;
+    height: 32px;
+    text-align: center;
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+    padding: 0;
+}
+
 </style>
 
 </head>
@@ -764,9 +832,13 @@ Sale Kaydet
 type="text"
 name="item_text"
 placeholder="e.g. T, Ex2, Lasagne"
-style="width:35%">
+style="width:32%">
 
-<input type="number" name="item_qty" value="1" min="1" style="width:55px">
+<span class="qty-stepper">
+<button type="button" onclick="stepQty('item_qty', -1)">−</button>
+<input type="number" id="item_qty" name="item_qty" value="1" min="1" readonly>
+<button type="button" onclick="stepQty('item_qty', 1)">+</button>
+</span>
 
 <button type="submit" class="secondary" style="background:#eef0eb;color:#202a1f;border:1px solid #d9ddd5;">
 + Ürün Ekle
@@ -788,6 +860,12 @@ style="width:35%">
 {% endfor %}
 </select>
 
+<span class="qty-stepper">
+<button type="button" onclick="stepQty('remove_qty', -1)">−</button>
+<input type="number" id="remove_qty" name="remove_qty" value="1" min="1" readonly>
+<button type="button" onclick="stepQty('remove_qty', 1)">+</button>
+</span>
+
 <button type="submit" class="secondary" style="background:#fdeaea;color:#9d2f2f;border:1px solid #f0d0d0;">
 Çıkar
 </button>
@@ -797,6 +875,15 @@ style="width:35%">
 {% endif %}
 
 {% endif %}
+
+<script>
+function stepQty(id, delta) {
+    var el = document.getElementById(id);
+    var v = (parseInt(el.value, 10) || 1) + delta;
+    if (v < 1) { v = 1; }
+    el.value = v;
+}
+</script>
 
 </div>
 
@@ -1706,6 +1793,11 @@ def home():
             base_order = request.form.get("base_order", "")
             remove_key = request.form.get("remove_line", "")
 
+            try:
+                remove_qty = int(request.form.get("remove_qty", "1") or 1)
+            except ValueError:
+                remove_qty = 1
+
             order = parse_order_text(base_order)
 
             m = re.match(r"^(drink|item)\:(\d+)$", remove_key)
@@ -1715,11 +1807,27 @@ def home():
                 idx = int(idx_str) - 1
 
                 if kind == "drink" and 0 <= idx < len(order["drinks"]):
-                    removed_label = order["drinks"].pop(idx)
-                    saved = f"Removed: {removed_label}"
+                    current_label = order["drinks"][idx]
+                    reduced = decrement_display_qty(current_label, by=remove_qty)
+
+                    if reduced is None:
+                        order["drinks"].pop(idx)
+                        saved = f"Removed: {current_label}"
+                    else:
+                        order["drinks"][idx] = reduced
+                        saved = f"Removed — now: {reduced}"
+
                 elif kind == "item" and 0 <= idx < len(order["items"]):
-                    removed_label = order["items"].pop(idx)["headline"]
-                    saved = f"Removed: {removed_label}"
+                    current_label = order["items"][idx]["headline"]
+                    reduced = decrement_display_qty(current_label, by=remove_qty)
+
+                    if reduced is None:
+                        order["items"].pop(idx)
+                        saved = f"Removed: {current_label}"
+                    else:
+                        order["items"][idx]["headline"] = reduced
+                        saved = f"Removed — now: {reduced}"
+
                 else:
                     error = "That line no longer exists."
             else:

@@ -3,322 +3,505 @@ from openai import OpenAI
 import os
 import base64
 import json
-from datetime import datetime
 
 app = Flask(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 RULES_FILE = "learned_codes.json"
-CORRECTIONS_FILE = "corrections.json"
-
-
-# ============================================================
-# DEFAULT CODES
-# ============================================================
 
 DEFAULT_CODES = {
     "C": "White Coffee",
     "BC": "Black Coffee",
     "L": "Latte",
-    "Can": "Can Drink",
-    "Bottle": "Bottle Drink",
-
+    "Can": "Can drink",
+    "Bottle": "Bottle drink",
     "E": "Egg",
-    "PE": "Poached Egg",
     "SE": "Scrambled Egg",
     "B": "Bacon",
     "S": "Sausage",
-    "BB": "Baked Beans",
     "Bubble": "Bubble"
 }
 
-
-# ============================================================
-# LOAD / SAVE CODES
-# ============================================================
-
 def load_codes():
-
     codes = DEFAULT_CODES.copy()
 
     try:
         with open(RULES_FILE, "r") as f:
-            learned = json.load(f)
-
-            if isinstance(learned, dict):
-                codes.update(learned)
-
-    except (FileNotFoundError, json.JSONDecodeError):
+            codes.update(json.load(f))
+    except:
         pass
 
     return codes
 
 
 def save_code(code, meaning):
-
     learned = {}
 
     try:
         with open(RULES_FILE, "r") as f:
             learned = json.load(f)
-
-            if not isinstance(learned, dict):
-                learned = {}
-
-    except (FileNotFoundError, json.JSONDecodeError):
+    except:
         pass
 
     learned[code] = meaning
 
     with open(RULES_FILE, "w") as f:
-        json.dump(
-            learned,
-            f,
-            indent=2,
-            ensure_ascii=False
-        )
+        json.dump(learned, f)
 
 
-# ============================================================
-# CORRECTIONS
-# ============================================================
+PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport"
+content="width=device-width, initial-scale=1">
 
-def load_corrections():
+<title>Moonrise Order App</title>
+</head>
 
-    try:
-        with open(CORRECTIONS_FILE, "r") as f:
-            data = json.load(f)
+<body style="font-family:Arial;padding:20px;max-width:700px;margin:auto">
 
-            if isinstance(data, list):
-                return data
+<h1>Moonrise Order App</h1>
 
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
+<h2>Read Order</h2>
 
-    return []
+<form method="POST" enctype="multipart/form-data">
 
+<input type="hidden" name="action" value="read">
 
-def save_correction(original, corrected):
+<input
+type="file"
+name="photo"
+accept="image/*"
+capture="environment"
+required>
 
-    corrections = load_corrections()
+<br><br>
 
-    original = original.strip()
-    corrected = corrected.strip()
+<button type="submit">
+Read Order
+</button>
 
-    for correction in corrections:
+</form>
 
-        old_original = correction.get(
-            "original",
-            ""
-        ).strip()
+{% if result %}
 
-        old_corrected = correction.get(
-            "corrected",
-            ""
-        ).strip()
+<hr>
+<h2>Order</h2>
 
-        if (
-            old_original == original
-            and old_corrected == corrected
-        ):
+<div style="white-space:pre-wrap;background:#eee;padding:15px">
+{{ result }}
+</div>
 
-            correction["times_seen"] = (
-                correction.get("times_seen", 1) + 1
-            )
+{% endif %}
 
-            correction["last_seen"] = (
-                datetime.now().isoformat(
-                    timespec="seconds"
-                )
-            )
+{% if unknowns %}
 
-            with open(CORRECTIONS_FILE, "w") as f:
-                json.dump(
-                    corrections,
-                    f,
-                    indent=2,
-                    ensure_ascii=False
-                )
+<hr>
 
-            return
+<h3>Teach Moonrise</h3>
 
-    corrections.append({
-        "original": original,
-        "corrected": corrected,
-        "times_seen": 1,
-        "last_seen": datetime.now().isoformat(
-            timespec="seconds"
-        )
-    })
+<p>I found codes I don't know:</p>
 
-    corrections = corrections[-100:]
+{% for code in unknowns %}
 
-    with open(CORRECTIONS_FILE, "w") as f:
-        json.dump(
-            corrections,
-            f,
-            indent=2,
-            ensure_ascii=False
-        )
+<div style="margin-bottom:15px;">
 
+<strong>{{ code }}</strong>
 
-def corrections_for_prompt():
+<form method="POST" style="display:inline;">
 
-    corrections = load_corrections()
+<input type="hidden"
+name="action"
+value="learn">
 
-    if not corrections:
-        return "No previous corrections."
+<input type="hidden"
+name="code"
+value="{{ code }}">
 
-    recent = corrections[-20:]
+<input type="text"
+name="meaning"
+placeholder="What does {{ code }} mean?"
+required>
 
-    blocks = []
+<button type="submit">
+Save
+</button>
 
-    for number, correction in enumerate(
-        recent,
-        start=1
-    ):
+</form>
 
-        block = (
-            "\nCORRECTION EXAMPLE "
-            + str(number)
-            + "\n\nAI READ:\n"
-            + correction.get("original", "")
-            + "\n\nHUMAN CORRECTED TO:\n"
-            + correction.get("corrected", "")
-            + "\n"
-        )
+</div>
 
-        blocks.append(block)
+{% endfor %}
 
-    return "\n".join(blocks)
+{% endif %}
 
 
-# ============================================================
-# UNKNOWN CODES
-# ============================================================
+{% if saved %}
 
-def get_unknowns(result):
+<p><strong>{{ saved }}</strong></p>
 
-    codes = load_codes()
+{% endif %}
 
+</body>
+</html>
+"""
+@app.route("/", methods=["GET", "POST"])
+def home():
+
+    result = ""
     unknowns = []
+    saved = ""
 
-    lines = result.splitlines()
+    if request.method == "POST":
 
-    inside_unknown = False
+        action = request.form.get("action")
 
-    for line in lines:
+        if action == "learn":
 
-        stripped = line.strip()
+            code = request.form.get("code", "").strip()
+            meaning = request.form.get("meaning", "").strip()
 
-        if stripped.upper() == "UNKNOWN:":
-            inside_unknown = True
-            continue
+            if code and meaning:
+                save_code(code, meaning)
+                saved = code + " = " + meaning + " saved."
 
-        if (
-            inside_unknown
-            and stripped.endswith(":")
-        ):
-            inside_unknown = False
-            continue
+        elif action == "read":
 
-        if not inside_unknown:
-            continue
+            photo = request.files.get("photo")
 
-        if not stripped:
-            continue
+            if photo:
 
-        if stripped.lower() in [
-            "none",
-            "n/a",
-            "unknown"
-        ]:
-            continue
+                try:
+                    image = base64.b64encode(
+                        photo.read()
+                    ).decode("utf-8")
 
-        code = stripped.lstrip("-• ").strip()
+                    mime = photo.mimetype or "image/jpeg"
 
-        if not code:
-            continue
+                    codes = load_codes()
 
-        if code in codes:
-            continue
+                    code_text = "\n".join(
+                        key + " = " + value
+                        for key, value in codes.items()
+                    )
 
-        if code not in unknowns:
-            unknowns.append(code)
+                    prompt = """
+Read this handwritten cafe order.
 
-    return unknowns
+Known codes:
+""" + code_text + """
+IMPORTANT RULES:
+
+A dot . is the ONLY separator between different products.
+VERY IMPORTANT:
+
+Never skip a product between dots.
+
+Each section separated by a dot . represents one product.
+The number of readable sections must match the number of products in the result.
+
+Example:
+
+C . L . Bottle
+
+has 3 products and MUST produce all 3:
+White Coffee
+Latte
+Bottle
+
+Do not merge them.
+Do not omit L.
+Do not change C into BC.
+C means White Coffee.
+BC means Black Coffee.
+L means Latte.
+
+Example:
+
+E . B . PE
+
+has 3 products and MUST produce all 3:
+Egg
+Bacon
+PE
+
+If PE is unknown, keep PE in the item AND put PE in UNKNOWN.
+
+Never drop E, B, C, L or any other clearly readable known code.
+
+The + sign is NOT used as a separator.
+Do NOT interpret + as separating products.
+
+Read each product between dots separately from left to right.
+
+Examples:
+
+C . L
+means:
+Coffee
+Latte
+
+T . C
+means:
+Tea
+Coffee
+
+BC . E
+means:
+Black Coffee
+Egg
+
+B . S
+means:
+Bacon
+Sausage
+
+2E means 2 Eggs.
+3B means 3 Bacon.
+L x2 means 2 Lattes.
+
+Numbers normally indicate quantity.
+A number is NOT an unknown product code.
+
+A dot . separates different products.
+Spaces can be part of one complete food instruction.
+
+For example:
+
+SE ON 2 TST (BROWN)
+
+is ONE food instruction and means:
+
+Scrambled Egg on 2 Brown Toast
+
+SE = Scrambled Egg
+ON = the word "on", not a product
+TST = Toast
+BROWN = Brown Toast
+
+Never interpret any letter in TST as a separator.
+
+Known codes always have priority over guesses.
+Do not change the meaning of a known code.
 
 
-# ============================================================
-# UPDATE CURRENT ORDER AFTER LEARNING
-# ============================================================
+A circled number is usually the table number.
 
-def update_order_after_learning(
-    current_order,
-    code,
-    meaning
-):
+Hope 1, Hope 2, Hope 3 and Hope 4
+are set menus.
 
-    if not current_order:
-        return ""
+No S -> Bubble means remove
+Sausage and replace it with Bubble.
 
-    lines = current_order.splitlines()
+Do not guess unknown shorthand.
 
-    new_lines = []
+If you see shorthand that is not
+in the known codes, write:
 
-    inside_unknown = False
+UNKNOWN: followed by the code.
 
-    for line in lines:
+ORDER PHRASE RULES:
 
-        stripped = line.strip()
+Some handwritten codes combine to form one complete food order.
+Do not automatically treat every word or code as a separate product.
 
-        if stripped.upper() == "UNKNOWN:":
+The dot . is the ONLY separator between different products.
 
-            inside_unknown = True
-            new_lines.append(line)
-            continue
+Example:
+B . S . E
 
-        if (
-            inside_unknown
-            and stripped.endswith(":")
-        ):
+means three separate products:
+Bacon
+Sausage
+Egg
 
-            inside_unknown = False
+A space does NOT separate products.
 
-        if inside_unknown:
+Some codes and words together form one complete food instruction.
 
-            clean = stripped.lstrip("-• ").strip()
+Example:
+SE ON 2 TST (BROWN)
 
-            if clean.lower() == code.lower():
-                continue
+must be interpreted as:
+Scrambled Egg on 2 Brown Toast
 
-            new_lines.append(line)
-            continue
+In this pattern:
+SE means Scrambled Egg.
+ON connects the food to the toast.
+2 means quantity 2.
+TST means Toast.
+BROWN means Brown Toast.
 
-        # Replace known code in normal order text.
+Do NOT put ON, 2, TST or BROWN in UNKNOWN when they are used
+in this pattern.
 
-        words = line.split()
+Numbers such as 1, 2 and 3 usually indicate quantity.
+A number by itself is NOT an unknown product code.
 
-        changed_words = []
+Never mistake handwritten T or any letter in TST for a separator.
 
-        for word in words:
+Always read the complete handwritten food phrase before deciding
+that individual parts are UNKNOWN.
+UNKNOWN RULES:
+Never silently ignore handwritten text.
 
-            prefix = ""
-            suffix = ""
-            core = word
+Every readable order line on the paper must appear somewhere in the result.
 
-            # Keep numbering such as 2-
-            if core.endswith("-"):
-                changed_words.append(core)
-                continue
+First check whether a code exists in the KNOWN CODES.
+If a code is known, use its saved meaning.
 
-            if core == code:
-                core = meaning
+If a short product code is NOT in KNOWN CODES, do NOT invent its meaning.
+Keep the exact code in the order and also put it in UNKNOWN.
 
-            changed_words.append(core)
+Example:
 
-        rebuilt = " ".join(changed_words)
+E . B . PE
 
-        # Handle modification:
-        # No E -> B
-        # No
+If E and B are known but PE is not known, output:
+
+- Egg
+- Bacon
+- PE
+
+UNKNOWN:
+PE
+
+Unknown codes must NEVER cause the rest of the line to disappear.
+
+If one part of a line is unknown, still process all known parts of that line.
+
+UNKNOWN must contain only the exact handwritten unknown code.
+Do not put explanations, quantities, connector words or complete food
+instructions in UNKNOWN.
+
+Numbers are quantities, not unknown codes.
+ON is a connector word, not an unknown product.
+
+If there are no unknown product codes, output:
+
+UNKNOWN:
+None
+
+Return the order using exactly this structure:
+
+DRINKS:
+List ONLY drinks here.
+Write each drink on a separate line.
+Convert known drink codes to their product names.
+
+ITEMS:
+Number each separate food order starting from 1.
+Set menus such as Hope 1, Hope 2, Hope 3 and Hope 4 are also ITEMS.
+Do not put set menus in a separate SET MENU section.
+
+Any change written directly under a food or set menu belongs to that item.
+
+Example:
+
+Hope 1
+No E -> S
+
+must be shown as:
+
+2- Hope 1
+   No E -> S
+
+Do not move No E -> S to another item.
+Keep related instructions underneath the food they belong to.
+
+Example:
+
+1- Scrambled Egg on 2 Toast
+
+2- Hope 1
+   No E -> S
+
+3- Egg
+   Bacon
+   PE
+
+Do NOT silently remove any handwritten food line.
+
+TABLE:
+Write the table number here.
+
+UNKNOWN:
+Write each unknown product code here.
+If there are no unknown codes, write None.
+"""
+
+                    response = client.responses.create(
+                        model="gpt-5.4-nano",
+                        input=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_text",
+                                        "text": prompt
+                                    },
+                                    {
+                                        "type": "input_image",
+                                        "image_url":
+                                        "data:" + mime +
+                                        ";base64," + image
+                                    }
+                                ]
+                            }
+                        ]
+                    )
+
+                    result = response.output_text
+
+                    lines = result.splitlines()
+
+                    for i, line in enumerate(lines):
+                        stripped = line.strip()
+
+                        if stripped.upper() == "UNKNOWN:":
+                            for next_line in lines[i + 1:]:
+                                code = next_line.strip()
+
+                                if not code:
+                                    continue
+
+                                if code.upper().endswith(":"):
+                                    break
+
+                                if code.lower() in ["none", "n/a", "unknown"]:
+                                    break
+
+                                if code not in unknowns:
+                                    unknowns.append(code)
+
+                        elif stripped.upper().startswith("UNKNOWN:"):
+                            value = stripped.split(":", 1)[1].strip()
+
+                            if value and value.lower() not in ["none", "n/a", "unknown"]:
+                                for code in value.split(","):
+                                    code = code.strip()
+
+                                    if code and code not in unknowns:
+                                        unknowns.append(code)
+
+                except Exception as e:
+
+                    result = "ERROR: " + str(e)
+
+    return render_template_string(
+        PAGE,
+        result=result,
+        unknowns=unknowns,
+        saved=saved
+    )
+
+
+if __name__ == "__main__":
+
+    port = int(os.environ.get("PORT", 10000))
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )

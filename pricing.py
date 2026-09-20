@@ -60,8 +60,9 @@ def load_learned_prices():
 
 
 def save_learned_price(raw_text, name, price):
+    base_text, _qty = split_quantity_suffix(raw_text)
     learned = load_learned_prices()
-    learned[_normalize(raw_text)] = {"name": name, "price": float(price)}
+    learned[_normalize(base_text)] = {"name": name, "price": float(price)}
 
     with open(LEARNED_PRICES_FILE, "w", encoding="utf-8") as f:
         json.dump(learned, f, indent=2, ensure_ascii=False)
@@ -204,20 +205,89 @@ def build_flat_products(menu):
     return flat_items, sandwich_fillings, jp_presets
 
 
+# ============================================================
+# SMALL BREAKFAST "PRICE CAP" COMBOS
+# If a customer orders items individually (as separate Extra
+# Toppings) and the sum happens to match one of the Small
+# Breakfast combos' ingredients exactly, and buying them
+# separately would cost MORE than the combo, charge the combo
+# price instead — staff always give the cheaper of the two.
+# ============================================================
+
+def _normalize_ingredient(name):
+    n = re.sub(r"[^a-z0-9 ]", " ", name.strip().lower())
+    n = re.sub(r"\s+", " ", n).strip()
+
+    # Very light singular/plural folding ("Eggs" / "Egg",
+    # "Hash Browns" / "Hash Brown") so combo names match the
+    # Extra Toppings list's own naming.
+    if len(n) > 3 and n.endswith("s") and not n.endswith("ss"):
+        n = n[:-1]
+
+    return n
+
+
+def _parse_combo_ingredients(display_name):
+    """"Egg, Bacon, Beans, Hash Brown" -> {"egg":1,"bacon":1,...}
+    "3 Ham, 2 Eggs & Chips" -> {"ham":3,"egg":2,"chip":1}"""
+
+    parts = re.split(r",|&", display_name)
+    result = {}
+
+    for part in parts:
+        part = part.strip()
+
+        if not part:
+            continue
+
+        m = re.match(r"^(\d+)\s+(.+)$", part)
+
+        if m:
+            qty = int(m.group(1))
+            ingredient = m.group(2)
+        else:
+            qty = 1
+            ingredient = part
+
+        key = _normalize_ingredient(ingredient)
+        result[key] = result.get(key, 0) + qty
+
+    return result
+
+
+def build_small_breakfast_combos(menu):
+    block = menu.get("small_breakfast") or {}
+    items = block.get("items") or {}
+    combos = []
+
+    for name, entry in items.items():
+        price = _price_of(entry)
+
+        if price is None:
+            continue
+
+        combos.append((name, price, _parse_combo_ingredients(name)))
+
+    return combos
+
+
 # Loaded once at import time; call reload_menu() if the menu
 # file changes (e.g. after uploading a new menu photo).
 try:
     _MENU = load_menu()
     FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS = build_flat_products(_MENU)
+    SMALL_BREAKFAST_COMBOS = build_small_breakfast_combos(_MENU)
 except FileNotFoundError:
     _MENU = {}
     FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS = [], [], []
+    SMALL_BREAKFAST_COMBOS = []
 
 
 def reload_menu():
-    global _MENU, FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS
+    global _MENU, FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS, SMALL_BREAKFAST_COMBOS
     _MENU = load_menu()
     FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS = build_flat_products(_MENU)
+    SMALL_BREAKFAST_COMBOS = build_small_breakfast_combos(_MENU)
 
 
 # ============================================================
@@ -452,6 +522,91 @@ def price_sandwich(raw_text):
     return f"{name} ({size_column})", price, f"sandwich: {name} / {size_column}"
 
 
+def _split_combo_parts(text):
+    """Split a section like "Bacon.Egg x2.Hash Brown" into its
+    dot/slash/comma-separated pieces, or None if it's clearly not
+    that shape (multi-line, has a "->" modifier, etc)."""
+
+    text = text.strip()
+
+    if not text or "\n" in text or "->" in text or "\u2192" in text:
+        return None
+
+    parts = re.split(r"\s*(?:\.|/|\||,)\s*", text)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    return parts if len(parts) >= 2 else None
+
+
+def price_extra_topping_combo(raw_text):
+    """
+    Some plates are ordered as a plain list of à la carte extras
+    with no single set-menu price ("Bacon.Egg x2.Hash Brown" —
+    just Bacon + 2 Eggs + a Hash Brown, priced individually from
+    the Extra Toppings list). Tried BEFORE the general fuzzy
+    dish-name match, because that generic match can otherwise
+    latch onto a similarly-worded fixed breakfast (e.g. matching
+    this to "Egg, Bacon, Beans, Hash Brown" at its own set price)
+    and silently give a plausible-looking but wrong total.
+
+    Only fires if EVERY part of the list matches a known Extra
+    Topping — a single non-topping word (a dish name, a note like
+    "well done") makes it bail out to the normal matcher instead.
+    """
+
+    parts = _split_combo_parts(raw_text)
+
+    if not parts:
+        return None
+
+    topping_candidates = [
+        (item["name"], item["name"])
+        for item in FLAT_ITEMS
+        if item["category"] == "extra_toppings"
+    ]
+
+    total = 0.0
+    labels = []
+    ordered_ingredients = {}
+
+    for part in parts:
+        base, qty = split_quantity_suffix(part)
+        match = best_fuzzy_match(base, topping_candidates, cutoff=0.6, ambiguity_margin=0.1)
+
+        if not match:
+            return None
+
+        key, name, score = match
+        price = next(
+            i["price"] for i in FLAT_ITEMS
+            if i["name"] == key and i["category"] == "extra_toppings"
+        )
+        total += price * qty
+        labels.append(f"{name} x{qty}" if qty > 1 else name)
+
+        ing_key = _normalize_ingredient(name)
+        ordered_ingredients[ing_key] = ordered_ingredients.get(ing_key, 0) + qty
+
+    # If what was ordered exactly matches a Small Breakfast combo's
+    # ingredients, and that combo is cheaper than the sum of
+    # buying the same things individually, use the combo price.
+    best_combo = None
+
+    for combo_name, combo_price, combo_ingredients in SMALL_BREAKFAST_COMBOS:
+        if combo_ingredients == ordered_ingredients and combo_price < total:
+            if best_combo is None or combo_price > best_combo[1]:
+                best_combo = (combo_name, combo_price)
+
+    if best_combo:
+        return (
+            best_combo[0],
+            best_combo[1],
+            f"capped at Small Breakfast combo (individually would be £{total:.2f})"
+        )
+
+    return " + ".join(labels), total, "sum of extra toppings"
+
+
 def price_food_item(raw_text):
     """
     Main entry point for pricing one food item's headline text
@@ -468,6 +623,10 @@ def price_food_item(raw_text):
         result = price_jacket_potato(text)
         if result:
             return result
+
+    combo_result = price_extra_topping_combo(text)
+    if combo_result:
+        return combo_result
 
     sandwich_result = price_sandwich(text)
     if sandwich_result:
@@ -565,6 +724,23 @@ def get_suggestions(raw_text, is_drink, n=3):
 # ============================================================
 
 _NUMBERED_LINE = re.compile(r"^\d+-\s*(.+)$")
+_QUANTITY_SUFFIX = re.compile(r"^(.*?)\s+x(\d+)$", re.IGNORECASE)
+
+
+def split_quantity_suffix(name):
+    """
+    "Tea x2" -> ("Tea", 2). "Latte" -> ("Latte", 1). Used so a
+    quantity written via app.py's "Tx2"/"Ex2" shorthand still
+    matches the plain menu item name, with price multiplied by
+    the quantity.
+    """
+
+    m = _QUANTITY_SUFFIX.match(name.strip())
+
+    if m:
+        return m.group(1).strip(), int(m.group(2))
+
+    return name.strip(), 1
 
 
 def _extract_block(result_text, block_name):
@@ -614,16 +790,17 @@ def apply_pricing(result_text):
     total = 0.0
 
     def resolve(name, is_drink):
-        key = _normalize(name)
+        base_name, qty = split_quantity_suffix(name)
+        key = _normalize(base_name)
         taught = learned.get(key)
 
         if taught:
-            return taught["name"], taught["price"], True
+            return taught["name"], taught["price"], True, qty
 
-        result = price_drink(name) if is_drink else price_food_item(name)
+        result = price_drink(base_name) if is_drink else price_food_item(base_name)
 
         if result:
-            return result[0], result[1], False
+            return result[0], result[1], False, qty
 
         return None
 
@@ -638,15 +815,17 @@ def apply_pricing(result_text):
         resolved = resolve(name, is_drink=True)
 
         if resolved:
-            matched_name, price, taught = resolved
-            total += price
+            matched_name, unit_price, taught, qty = resolved
+            line_total = unit_price * qty
+            total += line_total
             tag = " (taught)" if taught else ""
-            priced_lines.append(f"{name} — £{price:.2f}{tag}")
+            qty_note = f" (x{qty} = £{line_total:.2f})" if qty > 1 else ""
+            priced_lines.append(f"{name} — £{unit_price:.2f}{qty_note}{tag}")
         else:
             priced_lines.append(f"{name} — £? (unmatched)")
             unresolved_details.append({
                 "raw_text": name,
-                "suggestions": get_suggestions(name, is_drink=True)
+                "suggestions": get_suggestions(split_quantity_suffix(name)[0], is_drink=True)
             })
 
     # Only headline item lines (e.g. "1- Hope 1") are priced —
@@ -663,15 +842,17 @@ def apply_pricing(result_text):
         resolved = resolve(headline, is_drink=False)
 
         if resolved:
-            matched_name, price, taught = resolved
-            total += price
+            matched_name, unit_price, taught, qty = resolved
+            line_total = unit_price * qty
+            total += line_total
             tag = " (taught)" if taught else ""
-            priced_lines.append(f"{headline} — £{price:.2f}{tag}")
+            qty_note = f" (x{qty} = £{line_total:.2f})" if qty > 1 else ""
+            priced_lines.append(f"{headline} — £{unit_price:.2f}{qty_note}{tag}")
         else:
             priced_lines.append(f"{headline} — £? (unmatched)")
             unresolved_details.append({
                 "raw_text": headline,
-                "suggestions": get_suggestions(headline, is_drink=False)
+                "suggestions": get_suggestions(split_quantity_suffix(headline)[0], is_drink=False)
             })
 
     prices_block = "\n".join(priced_lines) if priced_lines else "None"

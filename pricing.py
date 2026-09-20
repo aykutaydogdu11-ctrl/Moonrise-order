@@ -282,12 +282,8 @@ except FileNotFoundError:
     FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS = [], [], []
     SMALL_BREAKFAST_COMBOS = []
 
-
-def reload_menu():
-    global _MENU, FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS, SMALL_BREAKFAST_COMBOS
-    _MENU = load_menu()
-    FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS = build_flat_products(_MENU)
-    SMALL_BREAKFAST_COMBOS = build_small_breakfast_combos(_MENU)
+# RECIPE_MAP depends on best_fuzzy_match, defined further below,
+# so it's built once that's available rather than up here.
 
 
 # ============================================================
@@ -423,6 +419,116 @@ def top_candidates(raw_text, candidates, n=3):
 
     scored.sort(reverse=True)
     return scored[:n]
+
+
+# ============================================================
+# RECIPE MAP (for ingredient-level sales counting)
+# Many dishes list their contents in the menu's "desc" field
+# ("Egg, bacon, sausage, chips, beans & toast" for Hope 1). This
+# parses those into {ingredient: qty}, matched against the Extra
+# Toppings vocabulary, so a sale of "Hope 1" can also count
+# toward total Sausage/Egg/Bacon usage — combined with any
+# Sausage sold standalone (e.g. via "S.E.HB") into one true total.
+# Words with no Extra Topping match (like "toast") are dropped —
+# they aren't tracked as a stock-relevant ingredient.
+# ============================================================
+
+def build_recipe_map(menu):
+    topping_candidates = [
+        (item["name"], item["name"])
+        for item in FLAT_ITEMS
+        if item["category"] == "extra_toppings"
+    ]
+
+    recipes = {}
+
+    for category, block in menu.items():
+        if not isinstance(block, dict) or category == "sandwiches":
+            continue
+
+        items = block.get("items")
+
+        if not isinstance(items, dict):
+            continue
+
+        for name, entry in items.items():
+            desc = _desc_of(entry)
+
+            if not desc:
+                continue
+
+            raw_ingredients = _parse_combo_ingredients(desc)
+            matched = {}
+
+            for ing_key, qty in raw_ingredients.items():
+                match = best_fuzzy_match(
+                    ing_key, topping_candidates, cutoff=0.75, ambiguity_margin=0.05
+                )
+
+                if match:
+                    _key, topping_name, _score = match
+                    matched[topping_name] = matched.get(topping_name, 0) + qty
+
+            if matched:
+                recipes[name] = matched
+
+    return recipes
+
+
+def compute_ingredient_counts(sale_items):
+    """
+    Post-processes an already-built sale_items list (from
+    apply_pricing) into {ingredient_name: total_qty}, combining:
+    - standalone Extra Topping sales (a combo like "Sausage + Egg
+      x2 + Hash Brown" is split back into its parts), and
+    - ingredients implied by any composite dish sold (e.g. each
+      "Hope 1" also counts as 1 Sausage, via RECIPE_MAP).
+    A dish that is itself a topping (ordered as a single food line
+    with no recipe) is counted directly too.
+    """
+
+    counts = {}
+
+    def add(name, qty):
+        counts[name] = counts.get(name, 0) + qty
+
+    topping_names_lower = {
+        i["name"].lower(): i["name"]
+        for i in FLAT_ITEMS if i["category"] == "extra_toppings"
+    }
+
+    for entry in sale_items:
+        name = entry["name"]
+        qty = entry.get("qty", 1)
+
+        if " + " in name:
+            for part in name.split(" + "):
+                base, part_qty = split_quantity_suffix(part)
+                add(base, part_qty * qty)
+            continue
+
+        recipe = RECIPE_MAP.get(name)
+
+        if recipe:
+            for ingredient, ing_qty in recipe.items():
+                add(ingredient, ing_qty * qty)
+            continue
+
+        if name.lower() in topping_names_lower:
+            add(topping_names_lower[name.lower()], qty)
+
+    return counts
+
+
+RECIPE_MAP = build_recipe_map(_MENU)
+
+
+def reload_menu():
+    global _MENU, FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS, SMALL_BREAKFAST_COMBOS, RECIPE_MAP
+    _MENU = load_menu()
+    FLAT_ITEMS, SANDWICH_FILLINGS, JP_PRESETS = build_flat_products(_MENU)
+    SMALL_BREAKFAST_COMBOS = build_small_breakfast_combos(_MENU)
+    RECIPE_MAP = build_recipe_map(_MENU)
 
 
 # ============================================================
@@ -884,4 +990,6 @@ def apply_pricing(result_text):
         + "\n\nPRICE UNKNOWN (needs manual price):\n" + unresolved_block
     )
 
-    return priced_result, total, unresolved_details, sale_items
+    ingredient_counts = compute_ingredient_counts(sale_items)
+
+    return priced_result, total, unresolved_details, sale_items, ingredient_counts

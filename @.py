@@ -751,7 +751,8 @@ Kaydet
 # section can never silently vanish the way "SE on FS" did before.
 # ============================================================
 
-TRANSCRIPTION_PROMPT = """
+def build_transcription_prompt(code_text):
+    return f"""
 You are reading a handwritten Moonrise Cafe order ticket.
 
 THIS FIRST STAGE IS TRANSCRIPTION ONLY.
@@ -827,6 +828,37 @@ written, including the last one. "L . Can . SW" must keep all
 three tokens — do not drop the final SW.
 
 ==================================================
+KNOWN SHORTHAND CODES (this ticket's vocabulary)
+==================================================
+
+This cafe's staff only ever write from this fixed set of short
+codes for the drinks/breakfast basics (other dishes are written
+as full names, handled separately):
+
+{code_text}
+
+These codes are usually single or double CAPITAL letters. A
+handwritten capital letter is easy to misread as a similar-looking
+DIGIT, and vice versa — most often:
+  S  <->  5
+  E  <->  F  (and sometimes 3)
+  B  <->  8  (and sometimes 3)
+  O  <->  0
+
+When a stroke is genuinely ambiguous between a digit and a
+letter, and reading it as one of the codes above would make it a
+valid known code, prefer that reading — these tickets are always
+written using this exact codebook, so "S" is far more likely than
+"5" in a food/drink context. Only keep a digit reading when it
+clearly belongs to a number (like a quantity, e.g. "2E", or the
+table number), not when it stands alone where a code is expected.
+
+This does not license inventing or expanding codes — it only
+resolves genuine stroke-level ambiguity in favor of this known
+vocabulary. If a token clearly doesn't match any known code and
+isn't a number, transcribe it exactly as written.
+
+==================================================
 LETTER-FOR-LETTER FIDELITY FOR SHORT CODES
 ==================================================
 
@@ -835,9 +867,10 @@ must be transcribed exactly as the letters appear, even if they
 don't spell a real word. Do NOT silently "autocorrect" or expand
 a short code into a full dictionary word — e.g. do not turn "L"
 into "Latte", and do not turn "Can" into any other word just
-because it resembles one. If a letter is ambiguous, transcribe
-your best single reading of the actual strokes, not a guess at
-what word it "should" be.
+because it resembles one. If a letter is ambiguous BETWEEN TWO
+LETTERS (not the digit case above), transcribe your best single
+reading of the actual strokes, not a guess at what word it
+"should" be.
 
 ==================================================
 TABLE NUMBER
@@ -868,7 +901,9 @@ Before answering, visually scan the image again from top to
 bottom. Check the final section immediately above the table
 number, and the final token on every line. If readable
 handwriting is missing from your "sections" array, add it
-before answering. Also check that no section appears twice.
+before answering. Also check that no section appears twice, and
+double-check any single-letter token against the known codes
+above (S vs 5, E vs F, B vs 8) before finalizing.
 """
 
 
@@ -1366,7 +1401,7 @@ def home():
                                 "content": [
                                     {
                                         "type": "input_text",
-                                        "text": TRANSCRIPTION_PROMPT
+                                        "text": build_transcription_prompt(code_text)
                                     },
                                     {
                                         "type": "input_image",

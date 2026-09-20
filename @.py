@@ -1609,7 +1609,7 @@ def home():
                 )
 
                 try:
-                    result, _total, price_unknowns, sale_items = (
+                    result, _total, price_unknowns, sale_items, _ingredients = (
                         pricing.apply_pricing(base_order)
                     )
                 except Exception:
@@ -1653,7 +1653,7 @@ def home():
                 )
 
                 try:
-                    result, _total, price_unknowns, sale_items = (
+                    result, _total, price_unknowns, sale_items, _ingredients = (
                         pricing.apply_pricing(base_order)
                     )
                 except Exception as e:
@@ -1690,7 +1690,7 @@ def home():
             )
 
             try:
-                result, total, price_unknowns, sale_items = (
+                result, total, price_unknowns, sale_items, ingredient_counts = (
                     pricing.apply_pricing(base_order)
                 )
 
@@ -1698,7 +1698,8 @@ def home():
                     sales.record_sale(
                         table or get_table_number(base_order),
                         sale_items,
-                        total
+                        total,
+                        ingredient_counts
                     )
 
                     saved = (
@@ -1776,7 +1777,7 @@ def home():
             )
 
             try:
-                result, _total, price_unknowns, sale_items = (
+                result, _total, price_unknowns, sale_items, _ingredients = (
                     pricing.apply_pricing(base_order)
                 )
             except Exception as e:
@@ -1841,7 +1842,7 @@ def home():
             )
 
             try:
-                result, _total, price_unknowns, sale_items = (
+                result, _total, price_unknowns, sale_items, _ingredients = (
                     pricing.apply_pricing(base_order)
                 )
             except Exception as e:
@@ -2023,7 +2024,7 @@ def home():
                             # pricing itself fails.
                             # ============================
                             try:
-                                result, _total, price_unknowns, sale_items = (
+                                result, _total, price_unknowns, sale_items, _ingredients = (
                                     pricing.apply_pricing(base_order)
                                 )
                             except Exception as price_err:
@@ -2061,7 +2062,7 @@ def home():
                             )
 
                             try:
-                                result, _total, price_unknowns, sale_items = (
+                                result, _total, price_unknowns, sale_items, _ingredients = (
                                     pricing.apply_pricing(base_order)
                                 )
                             except Exception:
@@ -2121,6 +2122,7 @@ button { padding: 10px 16px; font-size: 15px; cursor: pointer; border-radius: 7p
 .secondary { background: #eef0eb; color: #202a1f; }
 .success { background: #e9f5e9; padding: 12px; border-radius: 7px; margin-bottom: 20px; }
 a { color: #202a1f; }
+.muted { color: #888; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -2147,6 +2149,17 @@ a { color: #202a1f; }
 </table>
 {% else %}
 <p class="muted">Henüz satış yok.</p>
+{% endif %}
+
+{% if summary.ingredient_counts %}
+<h3 style="margin-top:18px; margin-bottom:6px; font-size:15px; color:#555;">Malzeme Bazlı Sayım</h3>
+<p class="muted" style="margin-top:0;">Hazır menülerin içindeki (örn. Hope 1'deki sosis) ve tek tek sipariş edilen malzemeler birlikte toplanmıştır.</p>
+<table>
+<tr><th>Malzeme</th><th>Adet</th></tr>
+{% for name, qty in summary.ingredient_counts %}
+<tr><td>{{ name }}</td><td>{{ qty }}</td></tr>
+{% endfor %}
+</table>
 {% endif %}
 
 </div>

@@ -10,6 +10,11 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 RULES_FILE = "learned_codes.json"
 
+# The "nano" tier model is fast/cheap but weak at multi-step reasoning like
+# this. If results are still poor after this rewrite, try a bigger model
+# in the same family by setting the OPENAI_MODEL environment variable.
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-nano")
+
 
 # ============================================================
 # DEFAULT MOONRISE CODES
@@ -77,14 +82,13 @@ def save_code(code, meaning):
 
 
 # ============================================================
-# UNKNOWN HELPERS
+# UNKNOWN HELPERS (used by the "Teach Moonrise" flow)
 # ============================================================
 
 def clean_unknown(code):
     code = code.strip()
     code = code.lstrip("-• ").strip()
 
-    # Remove accidental numbering such as "1- SW"
     code = re.sub(
         r"^\d+\s*[-.)]?\s*",
         "",
@@ -95,14 +99,6 @@ def clean_unknown(code):
 
 
 def split_unknown(value):
-    """
-    If AI accidentally writes:
-        Cap.SW
-        Cap / SW
-        Cap, SW
-    split them into separate unknown codes.
-    """
-
     value = clean_unknown(value)
 
     if not value:
@@ -110,8 +106,6 @@ def split_unknown(value):
 
     known = load_codes()
 
-    # If the complete code itself has been learned,
-    # don't split it.
     if value in known:
         return [value]
 
@@ -134,7 +128,7 @@ def split_unknown(value):
 
 def get_unknowns(result):
     """
-    Read only the UNKNOWN section produced by the AI.
+    Read only the UNKNOWN section of a rendered order.
     Learned codes are filtered out automatically.
     """
 
@@ -182,7 +176,6 @@ def get_unknowns(result):
         if not inside_unknown:
             continue
 
-        # Stop if somehow another heading appears.
         if stripped.endswith(":"):
             break
 
@@ -215,17 +208,13 @@ def get_unknowns(result):
 
 
 # ============================================================
-# UPDATE CURRENT ORDER AFTER TEACHING A CODE
+# CODE SUBSTITUTION (deterministic — never guessed by the AI)
 # ============================================================
 
 def replace_standalone_code(text, code, meaning):
     """
-    Replace a standalone shorthand without replacing letters
-    inside normal words.
-
-    Example:
-        SW -> Sparkling Water
-        Cap -> Cappuccino
+    Replace a standalone shorthand code without touching letters
+    inside normal words. e.g. SW -> Sparkling Water, Cap -> Cappuccino.
     """
 
     pattern = (
@@ -289,7 +278,6 @@ def update_current_order(current_order, code, meaning):
             )
         )
 
-    # Make sure UNKNOWN exists and says None if empty.
     try:
         unknown_index = next(
             i
@@ -559,7 +547,8 @@ Save
 
 # ============================================================
 # STAGE 1 PROMPT
-# TRANSCRIBE THE WHOLE PAPER BEFORE INTERPRETING IT
+# TRANSCRIBE ONLY — output is forced into strict JSON so a
+# section can never silently vanish the way "SE on FS" did before.
 # ============================================================
 
 TRANSCRIPTION_PROMPT = """
@@ -573,8 +562,8 @@ Do not expand codes.
 Do not decide what a code means.
 Do not invent products.
 
-Your job is to inspect the ENTIRE ticket from TOP TO BOTTOM
-and transcribe every readable handwritten order line.
+Your job is to inspect the ENTIRE ticket from TOP TO BOTTOM and
+transcribe every readable handwritten order line.
 
 ==================================================
 ZERO-LOSS RULE
@@ -596,10 +585,7 @@ PHYSICAL SECTIONS
 ==================================================
 
 Horizontal handwritten lines often separate physical sections.
-
-Inspect every section.
-
-If the paper contains:
+Inspect every section. If the paper contains:
 
 L . Cap . Can
 ----------------
@@ -613,496 +599,294 @@ No Onion
 ----------------
 circled 12
 
-your transcription must contain ALL of those sections.
-
-Do not stop after E . B . BB . Chips.
-
-The Spanish Omelette section is still part of the order.
-
-==================================================
-BOTTOM OF THE TICKET
-==================================================
-
-Pay special attention to the lower part of the ticket.
-
-Text immediately above the circled table number is often
-another food order.
-
-For example:
-
-Spanish Omelette
-No Onion
-
-must not disappear.
-
-Another example:
-
-SE on FS
-
-must not disappear.
+you must return FOUR separate section strings (one per
+horizontal block), in order, plus the table number. Do not
+merge sections and do not stop early — a food section near the
+bottom (e.g. "Spanish Omelette / No Onion", or "SE on FS") is
+just as important as the first drinks line.
 
 ==================================================
 DOT-SEPARATED HANDWRITING
 ==================================================
 
-Preserve every readable token.
-
-Example:
-
-L . Can . SW
-
-must contain:
-
-L
-Can
-SW
-
-Do not omit the final SW.
-
-Example:
-
-B . E . BB . Chips
-
-must contain:
-
-B
-E
-BB
-Chips
+Preserve every readable token inside a section exactly as
+written, including the last one. "L . Can . SW" must keep all
+three tokens — do not drop the final SW.
 
 ==================================================
 TABLE NUMBER
 ==================================================
 
 A circled number near the bottom is normally the table number.
-
-Write it separately as:
-
-TABLE:
-12
-
-or whatever number is visible.
+Return it as a plain string (e.g. "11"). If no table number is
+visible, return an empty string.
 
 ==================================================
-OUTPUT FORMAT
+OUTPUT
 ==================================================
 
-Return only:
+Return your answer using the provided JSON schema:
+- "sections": an ordered array of strings, one entry per
+  physical section on the ticket, top to bottom, transcribed
+  exactly as handwritten (verbatim, multi-line entries are fine).
+- "table": the table number as a string, or "" if not visible.
 
-SECTION 1:
-<exact readable handwriting>
-
-SECTION 2:
-<exact readable handwriting>
-
-SECTION 3:
-<exact readable handwriting>
-
-Continue until every physical order section is represented.
-
-TABLE:
-<number>
-
-Do not add interpretations.
+Do not add interpretation, commentary, or extra fields.
 
 ==================================================
 FINAL SCAN
 ==================================================
 
-Before answering, visually scan the image AGAIN from top
-to bottom.
-
-Check the final section immediately above the table number.
-
-Check the final token on every line.
-
-If readable handwriting is missing from your transcription,
-add it before answering.
+Before answering, visually scan the image again from top to
+bottom. Check the final section immediately above the table
+number, and the final token on every line. If readable
+handwriting is missing from your "sections" array, add it
+before answering.
 """
 
 
 # ============================================================
-# BUILD STAGE 2 PROMPT
+# STAGE 2 PROMPT
+# CLASSIFY + TOKENIZE ONLY. The model never expands a code to
+# its meaning — it only says "this section is a drink list" or
+# "this section is a food item", and which raw tokens inside it
+# look like shorthand. Python then does the actual code lookup
+# from the known-codes dictionary, so the model can no longer
+# hallucinate a wrong meaning for a real code.
 # ============================================================
 
-def build_interpretation_prompt(transcription, code_text):
+def build_classification_prompt(sections, code_text):
+    numbered = "\n".join(
+        f"{i}: {section}"
+        for i, section in enumerate(sections)
+    )
+
     return f"""
-You convert a transcription of a Moonrise Cafe handwritten
-ticket into a structured order.
-
-The transcription is the source of truth.
-
-You MUST process EVERY transcribed SECTION.
-
-Do not silently delete a section.
+You are given the transcribed physical sections of a Moonrise
+Cafe order ticket, numbered in the order they appear on the
+ticket (top to bottom). Do not reorder, merge, or drop any of
+them — your output array must have exactly one entry per input
+section, in the same order.
 
 ==================================================
-TRANSCRIPTION
+SECTIONS
 ==================================================
 
-{transcription}
-
+{numbered}
 
 ==================================================
-KNOWN MOONRISE CODES
+KNOWN MOONRISE CODES (context only — do not expand them yourself)
 ==================================================
 
 {code_text}
 
-
-Known shorthand must be displayed using its full meaning.
-
-Examples:
-
-L = Latte
-E = Egg
-B = Bacon
-BB = Baked Beans
-SE = Scrambled Egg
-S = Sausage
-
-If a code appears in KNOWN MOONRISE CODES, it is NOT unknown.
-
 ==================================================
-DRINK SECTIONS
+YOUR JOB
 ==================================================
 
-A drink section can contain several dot-separated drinks.
+For EACH section, decide:
 
-Example:
+1. "type": "drink" if the section is a short list of drink
+   codes (usually separated by dots, slashes, or commas, e.g.
+   "L . Can . SW"). Otherwise "food".
 
-L . Cap . SW
+2. "raw_text": copy the section's text back out exactly as
+   given, unmodified, preserving any line breaks.
 
-If L is known and Cap and SW are unknown:
+3. "drink_codes": ONLY for "drink" sections — the individual
+   codes in the section, split and in order, exactly as
+   handwritten (e.g. "L . Can . SW" -> ["L", "Can", "SW"]).
+   Leave this as an empty array for "food" sections.
 
-DRINKS:
-1- Latte
-2- Cap
-3- SW
+4. "shorthand_tokens": for "food" sections, list every short
+   abbreviation-like token that appears in the raw text which is
+   NOT a normal English word (e.g. "FO", "SE", "FS", "BB" are
+   shorthand; "No", "on", "Onion", "Hope", "Spanish", "Omelette"
+   are normal words and connectors — never list those). Include
+   a token even if you don't know what it means. Leave this as
+   an empty array if there are no shorthand tokens in that
+   section.
 
-UNKNOWN:
-Cap
-SW
-
-Never merge Cap and SW.
-
-Never guess their meanings.
-
-If the transcription contains:
-
-L . Can . SW
-
-the final order must account for all three tokens.
-
-Do not drop the final SW.
+DO NOT translate, expand, or guess the meaning of any code
+yourself anywhere in your answer — that happens afterwards in a
+separate step. Your only job here is classification and copying.
 
 ==================================================
-FOOD COMPONENT SECTIONS
+EXAMPLE
 ==================================================
 
-Several dot-separated food components in ONE physical
-food section normally belong to ONE food order.
-
-Example:
-
-B . E . BB . Chips
-
-means:
-
-1- Bacon
-   Egg
-   Baked Beans
-   Chips
-
-NOT:
-
-1- Bacon
-2- Egg
-3- Baked Beans
-4- Chips
-
-==================================================
-HOPE MENUS
-==================================================
-
-Hope 1
-Hope 2
-Hope 3
-Hope 4
-
-are set-menu food orders.
-
-A modification immediately underneath belongs to the same
-Hope item.
-
-Example:
-
-Hope 4
-No E -> B
-
-must become:
-
-Hope 4
-No Egg -> Bacon
-
-Example:
-
-Hope 1
-No S -> B
-
-must become:
-
-Hope 1
-No Sausage -> Bacon
-
-==================================================
-MODIFICATIONS
-==================================================
-
-Known shorthand inside modifications must also be expanded.
-
-No E -> B
-becomes:
-No Egg -> Bacon
-
-No S -> B
-becomes:
-No Sausage -> Bacon
-
-If FO is a learned code meaning Fried onion:
-
-No Bubble -> FO
-
-becomes:
-
-No Bubble -> Fried onion
-
-Do not leave known shorthand unexpanded.
-
-==================================================
-NORMAL FOOD NAMES
-==================================================
-
-Normal readable food names do NOT need to exist in the
-shorthand dictionary.
-
-Preserve them.
-
-Examples:
-
-Spanish Omelette
-Cheese Omelette
-Chips
-Toast
-Salad
-Sandwich
-
-A modification immediately underneath belongs to that food.
-
-Example transcription:
-
-Spanish Omelette
-No Onion
-
-must become one item:
-
-Spanish Omelette
-No Onion
-
-Never omit this section merely because it contains normal words.
-
-==================================================
-PARTIALLY UNKNOWN PHRASES
-==================================================
-
-If part of a phrase is known and part is unknown,
-KEEP THE ENTIRE PHRASE.
-
-Example:
-
-SE on FS
-
-SE is known as Scrambled Egg.
-FS is unknown.
-
-The item must be:
-
-Scrambled Egg on FS
-
-and:
-
-UNKNOWN:
-FS
-
-Do not delete the whole line.
-
-Do not put the whole phrase under UNKNOWN.
-
-Only FS is unknown.
-
-==================================================
-UNKNOWN RULES
-==================================================
-
-Unknown shorthand must remain visible in the order.
-
-Each unknown shorthand must also appear separately under UNKNOWN.
-
-Correct:
-
-UNKNOWN:
-Cap
-SW
-FS
-
-Wrong:
-
-UNKNOWN:
-Cap.SW
-
-Wrong:
-
-UNKNOWN:
-Cap SW
-
-Do NOT put known codes under UNKNOWN.
-
-Do NOT put normal English food words under UNKNOWN.
-
-Do NOT put connector words such as:
-on
-No
-
-under UNKNOWN.
-
-If there are no unknown codes:
-
-UNKNOWN:
-None
-
-==================================================
-TABLE
-==================================================
-
-Use the table number from the transcription.
-
-Do not treat it as an item or quantity.
-
-==================================================
-OUTPUT FORMAT
-==================================================
-
-Return exactly these four headings:
-
-DRINKS:
-
-ITEMS:
-
-TABLE:
-
-UNKNOWN:
-
-
-Number each separate drink.
-
-Number each separate FOOD ORDER.
-
-Components of the same food order should be indented
-under the same number.
-
-Example:
-
-DRINKS:
-1- Latte
-2- Cap
-3- Can drink
-
-ITEMS:
-1- Hope 1
-   No Sausage -> Bacon
-
-2- Egg
-   Bacon
-   Baked Beans
-   Chips
-
-3- Spanish Omelette
-   No Onion
-
-TABLE:
-12
-
-UNKNOWN:
-Cap
-
-==================================================
-SECTION ACCOUNTING
-==================================================
-
-Before answering, compare the final order with the
-transcription section by section.
-
-For every SECTION ask:
-
-"Where is this section represented in my final order?"
-
-Every order section must appear in DRINKS or ITEMS.
-
-Example:
-
-SECTION 1:
-L . Can . SW
-
-SECTION 2:
-Hope 4
-No Bubble -> FO
-
-SECTION 3:
-SE on FS
-
-TABLE:
-11
-
-If FO is already learned, the result must still include
-all three sections:
-
-DRINKS:
-1- Latte
-2- Can drink
-3- SW
-
-ITEMS:
-1- Hope 4
-   No Bubble -> Fried onion
-
-2- Scrambled Egg on FS
-
-TABLE:
-11
-
-UNKNOWN:
-SW
-FS
-
-SECTION 3 may NOT disappear.
-
-==================================================
-FINAL CHECK
-==================================================
-
-Before answering:
-
-1. Account for every transcribed section.
-2. Account for the final token on every line.
-3. Do not invent sections absent from the transcription.
-4. Do not duplicate Hope menus.
-5. Do not silently remove unknown shorthand.
-6. Do not remove normal food names.
-7. Expand known codes.
-8. Keep unknown codes visible.
-9. List each unknown shorthand separately.
-10. Return only the structured order.
+Input sections:
+0: L . Can . SW
+1: Hope 4
+   No Bubble -> FO
+2: SE on FS
+
+Correct output:
+[
+  {{"type": "drink", "raw_text": "L . Can . SW", "drink_codes": ["L", "Can", "SW"], "shorthand_tokens": []}},
+  {{"type": "food", "raw_text": "Hope 4\\nNo Bubble -> FO", "drink_codes": [], "shorthand_tokens": ["FO"]}},
+  {{"type": "food", "raw_text": "SE on FS", "drink_codes": [], "shorthand_tokens": ["SE", "FS"]}}
+]
+
+Note that every section is kept (none dropped), "SW" is not
+silently lost, and "FO"/"SE"/"FS" are flagged as shorthand
+tokens without being translated.
 """
+
+
+# ============================================================
+# JSON SCHEMAS FOR STRUCTURED OUTPUT
+# ============================================================
+
+TRANSCRIPTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "table": {
+            "type": "string",
+            "description": "The circled table number as written, or an empty string if none is visible."
+        },
+        "sections": {
+            "type": "array",
+            "description": "Every physical, horizontally-separated order section, top to bottom, transcribed verbatim.",
+            "items": {"type": "string"}
+        }
+    },
+    "required": ["table", "sections"],
+    "additionalProperties": False
+}
+
+
+def build_classification_schema(n_sections):
+    return {
+        "type": "object",
+        "properties": {
+            "sections": {
+                "type": "array",
+                # Force exactly one output entry per input section so
+                # a section can never be silently dropped at this step.
+                "minItems": n_sections,
+                "maxItems": n_sections,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["drink", "food"]
+                        },
+                        "raw_text": {"type": "string"},
+                        "drink_codes": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        },
+                        "shorthand_tokens": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "raw_text",
+                        "drink_codes",
+                        "shorthand_tokens"
+                    ],
+                    "additionalProperties": False
+                }
+            }
+        },
+        "required": ["sections"],
+        "additionalProperties": False
+    }
+
+
+# ============================================================
+# BUILD THE FINAL ORDER — deterministic, done in Python.
+# The AI never gets to decide what a known code means; it only
+# flagged which tokens are shorthand. This is what fixes the
+# "Can -> Black Coffee" / "known code marked UNKNOWN" bugs.
+# ============================================================
+
+def build_final_order(sections, table, known_codes):
+    known_lower = {
+        key.lower(): value
+        for key, value in known_codes.items()
+    }
+
+    unknowns = []
+
+    def resolve(code):
+        meaning = known_lower.get(code.strip().lower())
+
+        if meaning is None:
+            if code not in unknowns:
+                unknowns.append(code)
+            return code
+
+        return meaning
+
+    drinks_lines = []
+    items_lines = []
+    drink_num = 0
+    item_num = 0
+
+    for section in sections:
+        sec_type = section.get("type", "food")
+        raw_text = (section.get("raw_text") or "").strip()
+
+        if not raw_text:
+            continue
+
+        if sec_type == "drink":
+            codes = section.get("drink_codes") or []
+
+            if not codes:
+                # Safety net in case the model left this empty —
+                # split the raw text ourselves rather than lose it.
+                codes = re.split(r"\s*(?:\.|/|\||,)\s*", raw_text)
+                codes = [c.strip() for c in codes if c.strip()]
+
+            for code in codes:
+                drink_num += 1
+                drinks_lines.append(f"{drink_num}- {resolve(code)}")
+
+        else:
+            text = raw_text
+
+            for token in (section.get("shorthand_tokens") or []):
+                meaning = known_lower.get(token.strip().lower())
+
+                if meaning is not None:
+                    text = replace_standalone_code(text, token, meaning)
+                elif token not in unknowns:
+                    unknowns.append(token)
+
+            lines = [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip()
+            ]
+
+            if not lines:
+                continue
+
+            item_num += 1
+            items_lines.append(f"{item_num}- {lines[0]}")
+
+            for extra in lines[1:]:
+                items_lines.append(f"   {extra}")
+
+    drinks_block = "\n".join(drinks_lines) if drinks_lines else "None"
+    items_block = "\n".join(items_lines) if items_lines else "None"
+    unknown_block = "\n".join(unknowns) if unknowns else "None"
+    table_block = table.strip() if table and table.strip() else "Unknown"
+
+    result = (
+        "DRINKS:\n" + drinks_block + "\n\n"
+        "ITEMS:\n" + items_block + "\n\n"
+        "TABLE:\n" + table_block + "\n\n"
+        "UNKNOWN:\n" + unknown_block
+    )
+
+    return result, unknowns
 
 
 # ============================================================
@@ -1119,10 +903,7 @@ def home():
 
     if request.method == "POST":
 
-        action = request.form.get(
-            "action",
-            ""
-        )
+        action = request.form.get("action", "")
 
 
         # ====================================================
@@ -1131,27 +912,13 @@ def home():
 
         if action == "learn":
 
-            code = request.form.get(
-                "code",
-                ""
-            ).strip()
-
-            meaning = request.form.get(
-                "meaning",
-                ""
-            ).strip()
-
-            current_order = request.form.get(
-                "current_order",
-                ""
-            )
+            code = request.form.get("code", "").strip()
+            meaning = request.form.get("meaning", "").strip()
+            current_order = request.form.get("current_order", "")
 
             if code and meaning:
 
-                save_code(
-                    code,
-                    meaning
-                )
+                save_code(code, meaning)
 
                 result = update_current_order(
                     current_order,
@@ -1159,9 +926,7 @@ def home():
                     meaning
                 )
 
-                unknowns = get_unknowns(
-                    result
-                )
+                unknowns = get_unknowns(result)
 
                 saved = (
                     code
@@ -1177,9 +942,7 @@ def home():
 
         elif action == "read":
 
-            photo = request.files.get(
-                "photo"
-            )
+            photo = request.files.get("photo")
 
             if not photo:
                 error = "Please choose an order photo."
@@ -1193,23 +956,11 @@ def home():
                     # ========================================
 
                     image_bytes = photo.read()
-
-                    image = base64.b64encode(
-                        image_bytes
-                    ).decode("utf-8")
-
-                    mime = (
-                        photo.mimetype
-                        or "image/jpeg"
-                    )
-
-
-                    # ========================================
-                    # LOAD LEARNED CODES
-                    # ========================================
+                    image = base64.b64encode(image_bytes).decode("utf-8")
+                    mime = photo.mimetype or "image/jpeg"
+                    image_data_url = "data:" + mime + ";base64," + image
 
                     codes = load_codes()
-
                     code_text = "\n".join(
                         key + " = " + value
                         for key, value in codes.items()
@@ -1217,89 +968,156 @@ def home():
 
 
                     # ========================================
-                    # STAGE 1
-                    # TRANSCRIBE THE ENTIRE PAPER
+                    # STAGE 1 — TRANSCRIBE (strict JSON)
                     # ========================================
 
-                    transcription_response = (
-                        client.responses.create(
-                            model="gpt-5.4-nano",
-                            input=[
-                                {
-                                    "role": "user",
-                                    "content": [
+                    transcription_response = client.responses.create(
+                        model=MODEL,
+                        input=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_text",
+                                        "text": TRANSCRIPTION_PROMPT
+                                    },
+                                    {
+                                        "type": "input_image",
+                                        "image_url": image_data_url
+                                    }
+                                ]
+                            }
+                        ],
+                        text={
+                            "format": {
+                                "type": "json_schema",
+                                "name": "ticket_transcription",
+                                "strict": True,
+                                "schema": TRANSCRIPTION_SCHEMA
+                            }
+                        }
+                    )
+
+                    transcription_json = json.loads(
+                        transcription_response.output_text
+                    )
+
+                    sections_raw = transcription_json.get("sections", [])
+                    table = transcription_json.get("table", "")
+
+                    if not sections_raw:
+                        error = (
+                            "Could not read any order sections from "
+                            "that photo — try a clearer or better-lit "
+                            "picture."
+                        )
+
+                    else:
+
+                        # ================================
+                        # STAGE 2 — CLASSIFY + TOKENIZE
+                        # ================================
+
+                        try:
+                            classification_prompt = (
+                                build_classification_prompt(
+                                    sections_raw,
+                                    code_text
+                                )
+                            )
+
+                            schema = build_classification_schema(
+                                len(sections_raw)
+                            )
+
+                            classification_response = (
+                                client.responses.create(
+                                    model=MODEL,
+                                    input=[
                                         {
-                                            "type": "input_text",
-                                            "text": TRANSCRIPTION_PROMPT
-                                        },
-                                        {
-                                            "type": "input_image",
-                                            "image_url":
-                                                "data:"
-                                                + mime
-                                                + ";base64,"
-                                                + image
+                                            "role": "user",
+                                            "content": [
+                                                {
+                                                    "type": "input_text",
+                                                    "text": classification_prompt
+                                                }
+                                            ]
                                         }
-                                    ]
-                                }
-                            ]
-                        )
-                    )
-
-                    transcription = (
-                        transcription_response.output_text.strip()
-                    )
-
-
-                    # ========================================
-                    # STAGE 2
-                    # INTERPRET THE TRANSCRIPTION
-                    # ========================================
-
-                    interpretation_prompt = (
-                        build_interpretation_prompt(
-                            transcription,
-                            code_text
-                        )
-                    )
-
-                    interpretation_response = (
-                        client.responses.create(
-                            model="gpt-5.4-nano",
-                            input=[
-                                {
-                                    "role": "user",
-                                    "content": [
-                                        {
-                                            "type": "input_text",
-                                            "text": interpretation_prompt
+                                    ],
+                                    text={
+                                        "format": {
+                                            "type": "json_schema",
+                                            "name": "ticket_classification",
+                                            "strict": True,
+                                            "schema": schema
                                         }
-                                    ]
+                                    }
+                                )
+                            )
+
+                            classification_json = json.loads(
+                                classification_response.output_text
+                            )
+
+                            sections_out = classification_json.get(
+                                "sections",
+                                []
+                            )
+
+                            # Belt-and-braces: if the model still
+                            # returned the wrong number of sections,
+                            # pad with the raw text instead of losing
+                            # anything.
+                            if len(sections_out) != len(sections_raw):
+                                fixed = []
+
+                                for i, raw in enumerate(sections_raw):
+                                    if i < len(sections_out):
+                                        fixed.append(sections_out[i])
+                                    else:
+                                        fixed.append({
+                                            "type": "food",
+                                            "raw_text": raw,
+                                            "drink_codes": [],
+                                            "shorthand_tokens": []
+                                        })
+
+                                sections_out = fixed
+
+                            result, unknowns = build_final_order(
+                                sections_out,
+                                table,
+                                codes
+                            )
+
+                        except Exception as classify_err:
+                            # Classification failed — fall back to the
+                            # raw transcription rather than showing
+                            # nothing or guessing.
+                            sections_out = [
+                                {
+                                    "type": "food",
+                                    "raw_text": s,
+                                    "drink_codes": [],
+                                    "shorthand_tokens": []
                                 }
+                                for s in sections_raw
                             ]
-                        )
-                    )
 
-                    result = (
-                        interpretation_response.output_text.strip()
-                    )
+                            result, unknowns = build_final_order(
+                                sections_out,
+                                table,
+                                codes
+                            )
 
-
-                    # ========================================
-                    # FIND UNKNOWN CODES
-                    # ========================================
-
-                    unknowns = get_unknowns(
-                        result
-                    )
-
+                            error = (
+                                "Code lookup step failed, showing raw "
+                                "transcription instead: "
+                                + str(classify_err)
+                            )
 
                 except Exception as e:
-
-                    error = (
-                        "ERROR: "
-                        + str(e)
-                    )
+                    error = "ERROR: " + str(e)
 
 
     return render_template_string(
@@ -1316,15 +1134,5 @@ def home():
 # ============================================================
 
 if __name__ == "__main__":
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            10000
-        )
-    )
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)

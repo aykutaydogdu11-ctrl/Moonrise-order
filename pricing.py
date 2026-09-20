@@ -771,11 +771,16 @@ def _extract_block(result_text, block_name):
 
 def apply_pricing(result_text):
     """
-    Returns (priced_result_text, total, unresolved_details).
+    Returns (priced_result_text, total, unresolved_details, sale_items).
     unresolved_details is a list of
       {"raw_text": ..., "suggestions": [{"name","price"}, ...]}
     for items that need a human to confirm the price (used to
     render the "Confirm Price" screen).
+    sale_items is a list of {"name": <matched menu name>, "qty",
+    "unit_price", "line_total"} for every successfully-priced
+    line — grouped under the canonical matched name, not the raw
+    ticket text, so "Latte" and a typo'd "Latte" both count under
+    one name in sales reporting. Used to record a sale.
     Does not modify DRINKS/ITEMS — appends a PRICES + TOTAL
     section built from the same content.
     """
@@ -787,6 +792,7 @@ def apply_pricing(result_text):
 
     priced_lines = []
     unresolved_details = []
+    sale_items = []
     total = 0.0
 
     def resolve(name, is_drink):
@@ -821,6 +827,12 @@ def apply_pricing(result_text):
             tag = " (taught)" if taught else ""
             qty_note = f" (x{qty} = £{line_total:.2f})" if qty > 1 else ""
             priced_lines.append(f"{name} — £{unit_price:.2f}{qty_note}{tag}")
+            sale_items.append({
+                "name": matched_name,
+                "qty": qty,
+                "unit_price": unit_price,
+                "line_total": line_total
+            })
         else:
             priced_lines.append(f"{name} — £? (unmatched)")
             unresolved_details.append({
@@ -848,6 +860,12 @@ def apply_pricing(result_text):
             tag = " (taught)" if taught else ""
             qty_note = f" (x{qty} = £{line_total:.2f})" if qty > 1 else ""
             priced_lines.append(f"{headline} — £{unit_price:.2f}{qty_note}{tag}")
+            sale_items.append({
+                "name": matched_name,
+                "qty": qty,
+                "unit_price": unit_price,
+                "line_total": line_total
+            })
         else:
             priced_lines.append(f"{headline} — £? (unmatched)")
             unresolved_details.append({
@@ -866,4 +884,4 @@ def apply_pricing(result_text):
         + "\n\nPRICE UNKNOWN (needs manual price):\n" + unresolved_block
     )
 
-    return priced_result, total, unresolved_details
+    return priced_result, total, unresolved_details, sale_items

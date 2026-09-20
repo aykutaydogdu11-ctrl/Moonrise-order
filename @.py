@@ -11,6 +11,11 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 RULES_FILE = "learned_codes.json"
 CORRECTIONS_FILE = "corrections.json"
 
+
+# ============================================================
+# DEFAULT MOONRISE CODES
+# ============================================================
+
 DEFAULT_CODES = {
     "C": "White Coffee",
     "BC": "Black Coffee",
@@ -25,20 +30,24 @@ DEFAULT_CODES = {
     "S": "Sausage",
     "Bubble": "Bubble",
 
-    # Moonrise combined shorthand
+    # Exact combined shorthand.
+    # Because this exact code is saved here,
+    # its dots do NOT separate different products.
     "S.E.PE": "Sausage, Egg, Poached Egg"
 }
 
 
-# ---------------------------------------------------
+# ============================================================
 # LEARNED CODES
-# ---------------------------------------------------
+# ============================================================
 
 def load_codes():
+
     codes = DEFAULT_CODES.copy()
 
     try:
         with open(RULES_FILE, "r") as f:
+
             learned = json.load(f)
 
             if isinstance(learned, dict):
@@ -51,10 +60,12 @@ def load_codes():
 
 
 def save_code(code, meaning):
+
     learned = {}
 
     try:
         with open(RULES_FILE, "r") as f:
+
             learned = json.load(f)
 
             if not isinstance(learned, dict):
@@ -66,6 +77,7 @@ def save_code(code, meaning):
     learned[code] = meaning
 
     with open(RULES_FILE, "w") as f:
+
         json.dump(
             learned,
             f,
@@ -74,13 +86,16 @@ def save_code(code, meaning):
         )
 
 
-# ---------------------------------------------------
-# CORRECT & LEARN
-# ---------------------------------------------------
+# ============================================================
+# CORRECTIONS
+# ============================================================
 
 def load_corrections():
+
     try:
+
         with open(CORRECTIONS_FILE, "r") as f:
+
             data = json.load(f)
 
             if isinstance(data, list):
@@ -93,18 +108,22 @@ def load_corrections():
 
 
 def save_correction(original, corrected):
+
     corrections = load_corrections()
 
     original = original.strip()
     corrected = corrected.strip()
 
-    # Do not keep saving the exact same correction
+    # If exactly the same correction already exists,
+    # increase its counter instead of saving a duplicate.
     for correction in corrections:
+
         if (
             correction.get("original", "").strip() == original
             and
             correction.get("corrected", "").strip() == corrected
         ):
+
             correction["times_seen"] = (
                 correction.get("times_seen", 1) + 1
             )
@@ -114,6 +133,7 @@ def save_correction(original, corrected):
             )
 
             with open(CORRECTIONS_FILE, "w") as f:
+
                 json.dump(
                     corrections,
                     f,
@@ -130,11 +150,11 @@ def save_correction(original, corrected):
         "last_seen": datetime.now().isoformat(timespec="seconds")
     })
 
-    # Prevent the prompt/history file growing forever.
     # Keep the latest 100 corrections.
     corrections = corrections[-100:]
 
     with open(CORRECTIONS_FILE, "w") as f:
+
         json.dump(
             corrections,
             f,
@@ -144,13 +164,13 @@ def save_correction(original, corrected):
 
 
 def corrections_for_prompt():
+
     corrections = load_corrections()
 
     if not corrections:
         return "No previous corrected orders yet."
 
-    # Give the AI only the most recent examples.
-    # We do not need all 100 on every request.
+    # Only send the latest 20 examples to the AI.
     recent = corrections[-20:]
 
     blocks = []
@@ -172,12 +192,14 @@ HUMAN CORRECTED IT TO:
     return "\n".join(blocks)
 
 
-# ---------------------------------------------------
-# UNKNOWN PARSER
-# ---------------------------------------------------
+# ============================================================
+# FIND UNKNOWN CODES FROM AI RESULT
+# ============================================================
 
 def get_unknowns(result):
+
     unknowns = []
+
     lines = result.splitlines()
 
     for i, line in enumerate(lines):
@@ -193,7 +215,7 @@ def get_unknowns(result):
                 if not code:
                     continue
 
-                # Stop if another section begins
+                # Another section has started.
                 if code.upper().endswith(":"):
                     break
 
@@ -204,7 +226,6 @@ def get_unknowns(result):
                 ]:
                     break
 
-                # Remove simple bullet formatting
                 code = code.lstrip("-• ").strip()
 
                 if code and code not in unknowns:
@@ -223,7 +244,8 @@ def get_unknowns(result):
 
                 for code in value.split(","):
 
-                    code = code.strip().lstrip("-• ").strip()
+                    code = code.strip()
+                    code = code.lstrip("-• ").strip()
 
                     if code and code not in unknowns:
                         unknowns.append(code)
@@ -231,9 +253,9 @@ def get_unknowns(result):
     return unknowns
 
 
-# ---------------------------------------------------
-# PAGE
-# ---------------------------------------------------
+# ============================================================
+# HTML PAGE
+# ============================================================
 
 PAGE = """
 <!DOCTYPE html>
@@ -292,7 +314,7 @@ button {
 
 textarea {
     width: 100%;
-    min-height: 320px;
+    min-height: 360px;
     box-sizing: border-box;
     font-family: Arial, sans-serif;
     font-size: 16px;
@@ -303,6 +325,8 @@ textarea {
 input[type="text"] {
     padding: 10px;
     font-size: 15px;
+    width: 65%;
+    box-sizing: border-box;
 }
 
 .success {
@@ -317,12 +341,19 @@ input[type="text"] {
     font-size: 14px;
 }
 
+.unknown-box {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #ddd;
+}
+
 </style>
 
 </head>
 
 
 <body>
+
 
 <h1>Moonrise Order App</h1>
 
@@ -378,8 +409,12 @@ Read Order
 <h2>Order</h2>
 
 <p class="help">
-Check the order below. If anything is wrong,
-edit it before pressing Correct & Learn.
+
+Check the order below.
+
+If anything is wrong, edit it and press
+Correct & Learn.
+
 </p>
 
 
@@ -389,7 +424,6 @@ edit it before pressing Correct & Learn.
 type="hidden"
 name="action"
 value="correct">
-
 
 <input
 type="hidden"
@@ -420,19 +454,20 @@ Correct & Learn
 
 <div class="card">
 
-<h3>Teach Moonrise Codes</h3>
+<h2>Teach Moonrise</h2>
 
 <p class="help">
 
-These shorthand codes were not recognised.
-Teach Moonrise what they mean.
+I found shorthand codes that I do not know.
+
+Teach me what each one means.
 
 </p>
 
 
 {% for code in unknowns %}
 
-<div style="margin-bottom:15px;">
+<div class="unknown-box">
 
 <strong>{{ code }}</strong>
 
@@ -457,7 +492,9 @@ placeholder="What does {{ code }} mean?"
 required>
 
 <button type="submit">
-Save Code
+
+Save
+
 </button>
 
 </form>
@@ -477,9 +514,9 @@ Save Code
 """
 
 
-# ---------------------------------------------------
+# ============================================================
 # MAIN ROUTE
-# ---------------------------------------------------
+# ============================================================
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -493,9 +530,9 @@ def home():
         action = request.form.get("action")
 
 
-        # -------------------------------------------
-        # LEARN A SHORT CODE
-        # -------------------------------------------
+        # ====================================================
+        # LEARN UNKNOWN SHORT CODE
+        # ====================================================
 
         if action == "learn":
 
@@ -524,9 +561,9 @@ def home():
                 )
 
 
-        # -------------------------------------------
-        # CORRECT & LEARN
-        # -------------------------------------------
+        # ====================================================
+        # CORRECT & LEARN COMPLETE ORDER
+        # ====================================================
 
         elif action == "correct":
 
@@ -559,7 +596,7 @@ def home():
                     saved = (
                         "Correction saved. "
                         "Moonrise will use it "
-                        "as an example on future orders."
+                        "on future orders."
                     )
 
                 result = corrected
@@ -569,9 +606,9 @@ def home():
                 )
 
 
-        # -------------------------------------------
-        # READ PHOTO
-        # -------------------------------------------
+        # ====================================================
+        # READ ORDER PHOTO
+        # ====================================================
 
         elif action == "read":
 
@@ -606,84 +643,170 @@ def home():
                     )
 
 
+                    # ========================================
+                    # AI INSTRUCTIONS
+                    # ========================================
+
                     prompt = f"""
-You are reading handwritten cafe orders for Moonrise.
+You read handwritten cafe orders for Moonrise.
 
-Your job is to TRANSCRIBE AND INTERPRET the order accurately.
+Your job is to accurately read the handwriting,
+identify each separate product, and use Moonrise's
+learned shorthand codes.
 
-Do not invent products.
+Do NOT invent products.
 
-Do not silently remove readable handwriting.
+Do NOT silently remove readable handwriting.
 
 
-KNOWN MOONRISE CODES:
+==================================================
+KNOWN MOONRISE CODES
+==================================================
 
 {code_text}
 
 
-IMPORTANT:
-
-The known codes above have priority over guesses.
-
-Moonrise staff use shorthand.
-
-Some shorthand may contain dots.
-
-Therefore:
-
-A dot is OFTEN used to separate products,
-but a dot is NOT ALWAYS a product separator.
-
-Before splitting text at dots, first check whether
-the complete handwritten sequence matches a known
-Moonrise code or a previously learned pattern.
+Known codes have priority over guesses.
 
 
-VERY IMPORTANT EXAMPLE:
+==================================================
+VERY IMPORTANT DOT SEPARATOR RULE
+==================================================
+
+A dot "." is a PRODUCT SEPARATOR by default.
+
+Every readable section between dots must first be
+treated as a separate product or shorthand code.
+
+For example:
+
+L . Cap . SW
+
+MUST be read as THREE separate codes:
+
+L
+Cap
+SW
+
+Never combine Cap and SW.
+
+Never output:
+
+Cap.SW
+
+unless the exact complete code "Cap.SW" exists
+in KNOWN MOONRISE CODES.
+
+
+If L is known and Cap and SW are unknown:
+
+L must still be interpreted using its known meaning.
+
+Cap must remain Cap.
+
+SW must remain SW.
+
+UNKNOWN must then contain:
+
+Cap
+SW
+
+
+Another example:
+
+B . E . BB . Chips
+
+MUST first be read as FOUR separate sections:
+
+B
+E
+BB
+Chips
+
+Do NOT merge:
+
+B with E
+E with BB
+BB with Chips
+
+or any other sections.
+
+
+If B and E are known and BB is unknown:
+
+interpret B and E normally.
+
+Keep BB exactly as BB.
+
+"Chips" is an ordinary readable food word and
+does not need to be treated as shorthand merely
+because it is not in the code dictionary.
+
+UNKNOWN should contain:
+
+BB
+
+
+==================================================
+ONLY EXCEPTION TO THE DOT RULE
+==================================================
+
+A sequence containing dots may be treated as a
+combined Moonrise shorthand ONLY when the EXACT
+complete sequence already exists in:
+
+KNOWN MOONRISE CODES.
+
+For example:
 
 S.E.PE
 
-is a known Moonrise combined shorthand.
+exists as an exact known Moonrise code.
 
-It means:
+Therefore:
+
+S.E.PE
+
+can use its saved meaning:
 
 Sausage
 Egg
 Poached Egg
 
-It must NOT be interpreted as Scrambled Egg.
 
-It must NOT be split incorrectly just because
-there are dots in the shorthand.
+But:
 
+Cap.SW
 
-Another example:
+does NOT become one code unless the exact complete
+text:
 
-C . L . Bottle
+Cap.SW
 
-means three separate drinks:
-
-White Coffee
-Latte
-Bottle drink
+has previously been saved as a known Moonrise code.
 
 
-The difference must be decided using:
+CRITICAL:
 
-1. Known Moonrise codes
-2. The handwriting layout
-3. Spaces around separators
-4. Previous human corrections
-5. Order context
+Do NOT invent combined shorthand.
+
+Do NOT decide that two unknown codes form one code.
+
+Unknown codes on opposite sides of a dot are
+ALWAYS separate unknown codes unless their exact
+combined sequence already exists in KNOWN
+MOONRISE CODES.
 
 
-GENERAL RULES:
+==================================================
+KNOWN CODE RULES
+==================================================
 
 C = White Coffee
 BC = Black Coffee
 L = Latte
 
-Do not change C into BC.
+Do NOT change C into BC.
 
 PE = Poached Egg.
 
@@ -693,21 +816,51 @@ S = Sausage.
 
 E = Egg.
 
+B = Bacon.
 
-QUANTITIES:
+
+==================================================
+QUANTITIES
+==================================================
+
+Numbers can indicate quantities.
+
+Examples:
 
 2E = 2 Eggs
+
 3B = 3 Bacon
+
 L x2 = 2 Lattes
 
-Numbers normally indicate quantity.
 
-Numbers are not unknown product codes.
+Numbers are NOT unknown product codes.
 
 
-FOOD PHRASES:
+==================================================
+NORMAL FOOD WORDS
+==================================================
 
-Spaces can be part of one complete food instruction.
+Normal readable food words do not automatically
+become UNKNOWN codes.
+
+Examples include words such as:
+
+Chips
+Cheese
+Toast
+Brown
+White
+
+If a normal food word is clearly readable,
+preserve the word.
+
+
+==================================================
+FOOD PHRASES
+==================================================
+
+Spaces can form one complete food instruction.
 
 For example:
 
@@ -717,17 +870,23 @@ means:
 
 Scrambled Egg on 2 Brown Toast
 
+
 SE = Scrambled Egg
-ON = connector
+
+ON = connector word
+
 2 = quantity
+
 TST = Toast
+
 BROWN = Brown Toast
 
-Do not put ON, TST, BROWN or the quantity
-into UNKNOWN when they form a normal food phrase.
+
+Do not put ON, quantity, TST or BROWN into UNKNOWN
+when they clearly form this normal food phrase.
 
 
-TOAST EXAMPLE:
+Example:
 
 Cheese on 2 TST
 
@@ -736,7 +895,9 @@ means:
 Cheese on 2 Toast
 
 
-SET MENUS:
+==================================================
+SET MENUS
+==================================================
 
 Hope 1
 Hope 2
@@ -745,99 +906,169 @@ Hope 4
 
 are set-menu items.
 
-Keep modifications directly underneath
-the item they belong to.
+A modification written directly underneath a
+set menu belongs to that set menu.
 
 
 Example:
 
-Hope 1
-No S -> B
+Hope 4
+No E -> B
+
+must remain together:
+
+Hope 4
+No E -> B
+
+
+Do NOT turn the modification into another item.
+
+
+==================================================
+TABLE NUMBER
+==================================================
+
+A circled number is normally the table number.
+
+For example:
+
+a circled 13
 
 means:
-
-Hope 1
-No Sausage -> Bacon
-
-If the handwriting itself uses the shorthand,
-you may preserve the modification as:
-
-No S -> B
-
-Do not attach it to another item.
-
-
-TABLE NUMBER:
-
-A circled number is usually the table number.
-
-For example, a circled 13 should normally produce:
 
 TABLE:
 13
 
 
-UNKNOWN RULES:
+==================================================
+UNKNOWN CODE RULES
+==================================================
 
 If shorthand is not in KNOWN MOONRISE CODES
-and its meaning cannot safely be established,
-do NOT invent its meaning.
+and its meaning cannot safely be established:
 
-Keep the exact readable shorthand in the order
-and also put the exact code in UNKNOWN.
+DO NOT GUESS.
 
-Unknown codes must never cause other readable
-parts of the order to disappear.
+Keep the exact shorthand visible in the order.
 
-UNKNOWN should contain only actual unknown
-product shorthand.
-
-Do not put:
-
-quantities,
-ON,
-TST,
-BROWN,
-table numbers,
-or complete normal instructions
-
-into UNKNOWN.
+Also list it under UNKNOWN.
 
 
-PREVIOUS HUMAN CORRECTIONS:
+Most importantly:
 
-The examples below are orders that Moonrise staff
-previously corrected.
+Each unknown code must be listed SEPARATELY.
 
-Use them as examples of Moonrise handwriting,
-shorthand and order structure.
 
-A human correction has priority over an old
+For example:
+
+Cap . SW
+
+must produce:
+
+UNKNOWN:
+Cap
+SW
+
+
+NEVER:
+
+UNKNOWN:
+Cap.SW
+
+
+Another example:
+
+B . E . BB . Chips
+
+if B and E are known and BB is unknown:
+
+UNKNOWN:
+BB
+
+
+Do NOT put "Chips" into UNKNOWN simply because
+it is an ordinary food word rather than a saved
+short code.
+
+
+Do NOT put these into UNKNOWN:
+
+quantities
+table numbers
+connector words
+ordinary clearly readable food words
+complete food instructions
+
+
+==================================================
+DO NOT LOSE PRODUCTS
+==================================================
+
+Every readable section separated by a dot must
+appear somewhere in the interpreted order.
+
+Never silently skip a section.
+
+Never allow an unknown section to cause a known
+section next to it to disappear.
+
+
+Example:
+
+L . Cap . SW
+
+If Cap and SW are unknown, L must STILL appear.
+
+All three sections must survive:
+
+L
+Cap
+SW
+
+
+==================================================
+PREVIOUS HUMAN CORRECTIONS
+==================================================
+
+The following are previous corrections made by
+Moonrise staff.
+
+Use these examples to better understand Moonrise
+orders.
+
+A HUMAN CORRECTION is more reliable than the old
 AI interpretation.
+
+However:
+
+Do NOT blindly copy a previous order.
+
+Only use a previous correction when the current
+handwriting supports the same interpretation.
+
 
 {correction_text}
 
 
-IMPORTANT LEARNING RULE:
-
-Do not blindly copy a previous order.
-
-Previous corrections are examples.
-
-Use them only when the current handwriting
-actually supports the same interpretation.
-
-
-OUTPUT FORMAT:
+==================================================
+OUTPUT FORMAT
+==================================================
 
 Return exactly these sections:
 
 
 DRINKS:
 
-List drinks only.
+List only drinks here.
 
-One drink per line.
+Write each separate drink on its own line.
+
+Known drink codes must be converted to their
+known product names.
+
+If an unknown shorthand appears on a drink line,
+preserve it as a separate product and also put
+the shorthand under UNKNOWN.
 
 
 ITEMS:
@@ -856,7 +1087,7 @@ Example:
 3- Cheese on 2 Toast
 
 
-Keep modifications underneath the item
+Keep modifications directly underneath the item
 they belong to.
 
 
@@ -867,28 +1098,46 @@ Write only the table number.
 
 UNKNOWN:
 
-Write each unknown shorthand code.
+Write each unknown shorthand code on a
+SEPARATE LINE.
 
-If none:
+If there are no unknown codes, write:
 
 None
 
 
-FINAL CHECK BEFORE ANSWERING:
+==================================================
+FINAL CHECK
+==================================================
 
-Check the image again.
+Before answering:
 
-Make sure every readable order line appears
-somewhere in the result.
+Look at the image again.
 
-Do not add a product just because it appeared
-in a previous correction.
+Check every handwritten line.
 
-Do not omit readable products.
+Check every dot-separated section.
+
+If a dot-separated sequence is NOT an exact known
+combined Moonrise code, split it into separate
+sections.
+
+Make sure no readable product disappeared.
+
+Make sure unknown codes were not merged together.
+
+Make sure each unknown shorthand appears
+separately under UNKNOWN.
 
 Do not guess unknown shorthand.
+
+Do not invent products.
 """
 
+
+                    # ========================================
+                    # SEND IMAGE TO OPENAI
+                    # ========================================
 
                     response = client.responses.create(
 
@@ -900,16 +1149,12 @@ Do not guess unknown shorthand.
 
                                 "content": [
                                     {
-                                        "type":
-                                        "input_text",
-
-                                        "text":
-                                        prompt
+                                        "type": "input_text",
+                                        "text": prompt
                                     },
 
                                     {
-                                        "type":
-                                        "input_image",
+                                        "type": "input_image",
 
                                         "image_url":
                                         "data:"
@@ -923,12 +1168,10 @@ Do not guess unknown shorthand.
                     )
 
 
-                    result = (
-                        response.output_text
-                    )
+                    result = response.output_text
 
-                    unknowns = (
-                        get_unknowns(result)
+                    unknowns = get_unknowns(
+                        result
                     )
 
 
@@ -952,9 +1195,13 @@ Do not guess unknown shorthand.
     )
 
 
+# ============================================================
+# START APP
+# ============================================================
+
 if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
         port=10000
-    )
+        )

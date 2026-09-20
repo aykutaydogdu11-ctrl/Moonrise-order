@@ -1417,38 +1417,580 @@ Return only the finished order.
 """
 
 
-                    response = client.responses.create(
+                    # ============================================================
+# STAGE 1 - TRANSCRIBE THE PAPER EXACTLY
+# ============================================================
 
-                        model="gpt-5.4-nano",
+transcription_prompt = """
+You are reading a handwritten Moonrise Cafe order ticket.
 
-                        input=[
-                            {
-                                "role": "user",
+THIS IS TRANSCRIPTION ONLY.
 
-                                "content": [
-                                    {
-                                        "type": "input_text",
-                                        "text": prompt
-                                    },
+Do NOT interpret the order yet.
+Do NOT translate shorthand.
+Do NOT decide what is a drink or food.
+Do NOT expand codes.
+Do NOT guess meanings.
 
-                                    {
-                                        "type": "input_image",
-                                        "image_url":
-                                            "data:"
-                                            + mime
-                                            + ";base64,"
-                                            + image
-                                    }
-                                ]
-                            }
-                        ]
-                    )
+Your ONLY job is to copy every readable handwritten
+piece of text from the paper.
 
-                    result = response.output_text
+CRITICAL RULE:
 
-                    unknowns = get_unknowns(
-                        result
-                    )
+NOTHING READABLE MAY BE OMITTED.
+
+The ticket may contain several physical sections
+separated by horizontal handwritten lines.
+
+You MUST inspect the ENTIRE paper from TOP TO BOTTOM.
+
+Do not stop after reading the first few sections.
+
+Pay especially close attention to the LOWER HALF
+of the paper.
+
+Text immediately above the table number is still
+part of the order and MUST be transcribed.
+
+For example, if the bottom of the paper says:
+
+Spanish Omelette
+No Onion
+
+you MUST include both lines.
+
+If another paper says:
+
+SE on FS
+
+you MUST include that line exactly.
+
+If the top says:
+
+L . Cap . SW
+
+include all three tokens.
+
+If another section says:
+
+B . E . BB . Chips
+
+include all four tokens.
+
+Preserve:
+- words
+- shorthand
+- dots
+- arrows
+- quantities
+- modifications
+- table numbers
+
+A circled number should be transcribed as:
+
+[CIRCLED: 12]
+
+or whatever number is visible.
+
+Use this format:
+
+SECTION 1:
+<handwriting>
+
+SECTION 2:
+<handwriting>
+
+SECTION 3:
+<handwriting>
+
+Continue for EVERY physical section.
+
+TABLE:
+<circled number if present>
+
+Before answering, scan the paper AGAIN from
+TOP TO BOTTOM.
+
+Ask yourself:
+
+Did I include the final handwritten section
+immediately above the table number?
+
+Did I accidentally skip a section because I
+already understood the rest of the order?
+
+Did I include every readable line?
+
+If any readable text is missing, add it.
+
+Return ONLY the transcription.
+"""
+
+
+transcription_response = client.responses.create(
+    model="gpt-5.4-nano",
+    input=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": transcription_prompt
+                },
+                {
+                    "type": "input_image",
+                    "image_url":
+                        "data:"
+                        + mime
+                        + ";base64,"
+                        + image
+                }
+            ]
+        }
+    ]
+)
+
+transcription = transcription_response.output_text
+
+
+# ============================================================
+# STAGE 2 - INTERPRET THE TRANSCRIPTION
+# ============================================================
+
+interpret_prompt = f"""
+You convert a transcribed Moonrise Cafe ticket
+into a structured order.
+
+IMPORTANT:
+
+The transcription below is the source of truth.
+
+You MUST process EVERY section and EVERY line
+in the transcription.
+
+You are NOT allowed to silently remove a section.
+
+==================================================
+TRANSCRIPTION
+==================================================
+
+{transcription}
+
+
+==================================================
+KNOWN MOONRISE CODES
+==================================================
+
+{code_text}
+
+
+Known codes must be expanded to their full meaning.
+
+Examples:
+
+L = Latte
+E = Egg
+B = Bacon
+BB = Baked Beans
+SE = Scrambled Egg
+S = Sausage
+
+
+If a learned code exists in KNOWN MOONRISE CODES,
+use its saved meaning.
+
+
+==================================================
+DRINKS
+==================================================
+
+Drink shorthand written together in the top
+drink section represents separate drinks.
+
+Example:
+
+L . Cap . SW
+
+If L is known and Cap and SW are unknown:
+
+DRINKS:
+1- Latte
+2- Cap
+3- SW
+
+Do not combine Cap and SW.
+
+Unknown drinks must remain visible.
+
+
+==================================================
+FOOD COMPONENT ROWS
+==================================================
+
+Several dot-separated food components in ONE
+physical section normally belong to ONE food order.
+
+Example:
+
+B . E . BB . Chips
+
+becomes:
+
+1- Bacon
+   Egg
+   Baked Beans
+   Chips
+
+Do NOT number Bacon, Egg, Baked Beans and Chips
+as four different food orders.
+
+
+==================================================
+NORMAL FOOD NAMES
+==================================================
+
+Normal readable food names must be preserved.
+
+Examples:
+
+Spanish Omelette
+Cheese Omelette
+Chips
+Toast
+Sandwich
+Salad
+
+Do not remove them merely because they are not
+in the shorthand dictionary.
+
+
+A modification directly underneath a food belongs
+to that food.
+
+Example:
+
+Spanish Omelette
+No Onion
+
+must become:
+
+3- Spanish Omelette
+   No Onion
+
+
+This is VERY IMPORTANT.
+
+Every transcribed physical food section must
+produce an item in ITEMS.
+
+
+==================================================
+HOPE MENUS
+==================================================
+
+Hope 1
+Hope 2
+Hope 3
+Hope 4
+
+are food/set-menu items.
+
+A modification immediately underneath belongs
+to that Hope item.
+
+Example:
+
+Hope 1
+No S -> B
+
+becomes:
+
+Hope 1
+No Sausage -> Bacon
+
+
+Example:
+
+Hope 4
+No E -> B
+
+becomes:
+
+Hope 4
+No Egg -> Bacon
+
+
+==================================================
+MODIFICATIONS
+==================================================
+
+Expand known shorthand inside modifications.
+
+No E -> B
+
+must become:
+
+No Egg -> Bacon
+
+
+No S -> B
+
+must become:
+
+No Sausage -> Bacon
+
+
+No Bubble -> FO
+
+If FO is learned as Fried onion, becomes:
+
+No Bubble -> Fried onion
+
+
+==================================================
+PARTIALLY UNKNOWN PHRASES
+==================================================
+
+Never delete an entire phrase because one code
+is unknown.
+
+Example:
+
+SE on FS
+
+If SE is known and FS is unknown:
+
+Scrambled Egg on FS
+
+and:
+
+UNKNOWN:
+FS
+
+
+Preserve the complete phrase.
+
+
+==================================================
+UNKNOWN CODES
+==================================================
+
+Only shorthand whose meaning is genuinely unknown
+belongs under UNKNOWN.
+
+Do NOT put a code under UNKNOWN if it exists in
+KNOWN MOONRISE CODES.
+
+If FO is already learned as Fried onion:
+
+use Fried onion
+
+and DO NOT put FO under UNKNOWN.
+
+
+Each unknown code must be listed separately.
+
+Example:
+
+Cap
+SW
+
+NOT:
+
+Cap.SW
+
+
+Normal English food words are NOT unknown codes.
+
+Do NOT put these under UNKNOWN:
+
+Spanish
+Omelette
+Onion
+Chips
+Toast
+Hope
+No
+on
+
+
+==================================================
+TABLE
+==================================================
+
+Use the circled/table number from the transcription.
+
+Do not treat the table number as an item or quantity.
+
+
+==================================================
+OUTPUT FORMAT
+==================================================
+
+Return EXACTLY:
+
+DRINKS:
+
+<numbered drinks>
+
+
+ITEMS:
+
+<numbered food orders>
+
+
+TABLE:
+
+<table number>
+
+
+UNKNOWN:
+
+<each unknown shorthand on its own line>
+
+
+If there are no unknown shorthand codes:
+
+UNKNOWN:
+None
+
+
+==================================================
+SECTION ACCOUNTING CHECK
+==================================================
+
+Before answering, count the physical sections in
+the transcription.
+
+Every order section must be represented somewhere
+in DRINKS or ITEMS.
+
+For example, if transcription contains:
+
+SECTION 1:
+L . Cap . Can
+
+SECTION 2:
+Hope 1
+No S -> B
+
+SECTION 3:
+E . B . BB . Chips
+
+SECTION 4:
+Spanish Omelette
+No Onion
+
+TABLE:
+12
+
+then the final result MUST contain:
+
+DRINKS:
+1- Latte
+2- Cap
+3- Can drink
+
+ITEMS:
+1- Hope 1
+   No Sausage -> Bacon
+
+2- Egg
+   Bacon
+   Baked Beans
+   Chips
+
+3- Spanish Omelette
+   No Onion
+
+TABLE:
+12
+
+UNKNOWN:
+Cap
+
+
+SECTION 4 MUST NOT DISAPPEAR.
+
+
+Another example:
+
+SECTION 1:
+L . Can . SW
+
+SECTION 2:
+Hope 4
+No Bubble -> FO
+
+SECTION 3:
+SE on FS
+
+TABLE:
+11
+
+If FO is already learned, the result must include:
+
+DRINKS:
+1- Latte
+2- Can drink
+3- SW
+
+ITEMS:
+1- Hope 4
+   No Bubble -> Fried onion
+
+2- Scrambled Egg on FS
+
+TABLE:
+11
+
+UNKNOWN:
+SW
+FS
+
+
+==================================================
+FINAL CHECK
+==================================================
+
+Compare your finished result against the
+TRANSCRIPTION, section by section.
+
+For SECTION 1:
+Where did it appear?
+
+For SECTION 2:
+Where did it appear?
+
+Continue until every section is accounted for.
+
+Do NOT finish while an order section is missing.
+
+Do not invent handwriting that is absent from
+the transcription.
+
+Return only the finished structured order.
+"""
+
+
+interpret_response = client.responses.create(
+    model="gpt-5.4-nano",
+    input=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": interpret_prompt
+                }
+            ]
+        }
+    ]
+)
+
+result = interpret_response.output_text
+
+unknowns = get_unknowns(result)
 
 
                 except Exception as e:

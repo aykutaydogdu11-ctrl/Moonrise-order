@@ -875,6 +875,99 @@ def _extract_block(result_text, block_name):
     return block_lines
 
 
+# ============================================================
+# FREE BREAKFAST DRINK
+# Every "breakfast" category dish includes one basic hot drink.
+# A pricier drink can spend that same credit for just its
+# surcharge instead of full price (e.g. Ice Latte +£1). Add more
+# entries to DRINK_UPGRADE_FILE (or here) as new upgrade drinks
+# come up — anything not listed here or in the basic set is
+# always charged full price, even if credits remain.
+# ============================================================
+
+FREE_BASE_DRINK_NAMES = {
+    "tea", "black coffee", "flat white", "cappuccino", "latte"
+}
+
+DRINK_UPGRADE_FILE = os.environ.get("DRINK_UPGRADE_FILE", "drink_upgrades.json")
+DEFAULT_DRINK_UPGRADES = {
+    "Ice Latte": 1.00,
+}
+
+
+def load_drink_upgrades():
+    upgrades = DEFAULT_DRINK_UPGRADES.copy()
+
+    try:
+        with open(DRINK_UPGRADE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                upgrades.update(data)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    return upgrades
+
+
+def _category_of(name):
+    for item in FLAT_ITEMS:
+        if item["name"] == name and item["category"] not in (
+            "hot_drinks", "cold_drinks", "milkshakes"
+        ):
+            return item["category"]
+
+    return None
+
+
+def apply_breakfast_credit(matched_name, unit_price, qty, credits_remaining):
+    """
+    Decides how many units of this drink line are covered by
+    remaining free-breakfast credits, and returns
+    (line_total, note_for_display, credits_remaining_after).
+    """
+
+    if credits_remaining <= 0:
+        return unit_price * qty, "", credits_remaining
+
+    name_lower = matched_name.lower()
+
+    if name_lower in FREE_BASE_DRINK_NAMES:
+        free_qty = min(qty, credits_remaining)
+        paid_qty = qty - free_qty
+        line_total = unit_price * paid_qty
+        credits_remaining -= free_qty
+
+        if free_qty == qty:
+            note = " (free with breakfast)"
+        else:
+            note = f" ({free_qty} free w/ breakfast, {paid_qty} full price)"
+
+        return line_total, note, credits_remaining
+
+    upgrades = load_drink_upgrades()
+    surcharge = upgrades.get(matched_name)
+
+    if surcharge is not None:
+        covered_qty = min(qty, credits_remaining)
+        remaining_qty = qty - covered_qty
+        line_total = surcharge * covered_qty + unit_price * remaining_qty
+        credits_remaining -= covered_qty
+
+        if covered_qty == qty:
+            note = f" ({covered_qty} at £{surcharge:.2f} breakfast upgrade)"
+        elif covered_qty > 0:
+            note = (
+                f" ({covered_qty} at £{surcharge:.2f} breakfast upgrade, "
+                f"{remaining_qty} full price)"
+            )
+        else:
+            note = ""
+
+        return line_total, note, credits_remaining
+
+    return unit_price * qty, "", credits_remaining
+
+
 def apply_pricing(result_text):
     """
     Returns (priced_result_text, total, unresolved_details, sale_items).
@@ -887,6 +980,20 @@ def apply_pricing(result_text):
     line — grouped under the canonical matched name, not the raw
     ticket text, so "Latte" and a typo'd "Latte" both count under
     one name in sales reporting. Used to record a sale.
+
+    Free breakfast drink: every "breakfast" category dish ordered
+    (Hope 1, Full English, ...) grants one free basic hot drink
+    (Tea, Black Coffee, Flat White, Cappuccino, Latte). A pricier
+    drink can use that same credit for just its listed upgrade
+    surcharge (see DRINK_UPGRADE_SURCHARGES) instead of its full
+    price. Extra basic/upgrade drinks beyond the number of
+    breakfasts ordered are charged normally. Cold drinks never
+    draw on the credit. Which specific drink line "used" the
+    credit is chosen in ticket order — since a shared table's
+    ticket doesn't say who ordered what, this is a best guess;
+    the PRICES text always states which line got the credit so
+    staff can correct it via +/- Ürün if it guessed wrong.
+
     Does not modify DRINKS/ITEMS — appends a PRICES + TOTAL
     section built from the same content.
     """
@@ -896,7 +1003,6 @@ def apply_pricing(result_text):
     drink_lines = _extract_block(result_text, "DRINKS")
     item_lines = _extract_block(result_text, "ITEMS")
 
-    priced_lines = []
     unresolved_details = []
     sale_items = []
     total = 0.0
@@ -916,39 +1022,11 @@ def apply_pricing(result_text):
 
         return None
 
-    for line in drink_lines:
-        stripped = line.strip()
-        m = _NUMBERED_LINE.match(stripped)
+    # ---- Resolve food items FIRST: needed to know how many free
+    # breakfast-drink credits this order earns before pricing the
+    # drinks below. ----
+    item_price_lines = []
 
-        if not m or stripped.lower() == "none":
-            continue
-
-        name = m.group(1).strip()
-        resolved = resolve(name, is_drink=True)
-
-        if resolved:
-            matched_name, unit_price, taught, qty = resolved
-            line_total = unit_price * qty
-            total += line_total
-            tag = " (taught)" if taught else ""
-            qty_note = f" (x{qty} = £{line_total:.2f})" if qty > 1 else ""
-            priced_lines.append(f"{name} — £{unit_price:.2f}{qty_note}{tag}")
-            sale_items.append({
-                "name": matched_name,
-                "qty": qty,
-                "unit_price": unit_price,
-                "line_total": line_total
-            })
-        else:
-            priced_lines.append(f"{name} — £? (unmatched)")
-            unresolved_details.append({
-                "raw_text": name,
-                "suggestions": get_suggestions(split_quantity_suffix(name)[0], is_drink=True)
-            })
-
-    # Only headline item lines (e.g. "1- Hope 1") are priced —
-    # indented modifier lines ("No Onion", "Cucumber Tomato")
-    # describe the same dish and don't add their own price.
     for line in item_lines:
         stripped = line.strip()
         m = _NUMBERED_LINE.match(stripped)
@@ -965,7 +1043,7 @@ def apply_pricing(result_text):
             total += line_total
             tag = " (taught)" if taught else ""
             qty_note = f" (x{qty} = £{line_total:.2f})" if qty > 1 else ""
-            priced_lines.append(f"{headline} — £{unit_price:.2f}{qty_note}{tag}")
+            item_price_lines.append(f"{headline} — £{unit_price:.2f}{qty_note}{tag}")
             sale_items.append({
                 "name": matched_name,
                 "qty": qty,
@@ -973,11 +1051,57 @@ def apply_pricing(result_text):
                 "line_total": line_total
             })
         else:
-            priced_lines.append(f"{headline} — £? (unmatched)")
+            item_price_lines.append(f"{headline} — £? (unmatched)")
             unresolved_details.append({
                 "raw_text": headline,
                 "suggestions": get_suggestions(split_quantity_suffix(headline)[0], is_drink=False)
             })
+
+    breakfast_credits = sum(
+        s["qty"] for s in sale_items
+        if _category_of(s["name"]) == "breakfast"
+    )
+
+    # ---- Resolve drinks, spending free-breakfast credits as they
+    # come up in ticket order. ----
+    drink_price_lines = []
+
+    for line in drink_lines:
+        stripped = line.strip()
+        m = _NUMBERED_LINE.match(stripped)
+
+        if not m or stripped.lower() == "none":
+            continue
+
+        name = m.group(1).strip()
+        resolved = resolve(name, is_drink=True)
+
+        if resolved:
+            matched_name, unit_price, taught, qty = resolved
+            line_total, credit_note, breakfast_credits = apply_breakfast_credit(
+                matched_name, unit_price, qty, breakfast_credits
+            )
+            total += line_total
+            tag = " (taught)" if taught else ""
+            qty_note = f" (x{qty})" if qty > 1 else ""
+            drink_price_lines.append(
+                f"{name} — £{unit_price:.2f}{qty_note}{credit_note}{tag}"
+                f" = £{line_total:.2f}"
+            )
+            sale_items.append({
+                "name": matched_name,
+                "qty": qty,
+                "unit_price": unit_price,
+                "line_total": line_total
+            })
+        else:
+            drink_price_lines.append(f"{name} — £? (unmatched)")
+            unresolved_details.append({
+                "raw_text": name,
+                "suggestions": get_suggestions(split_quantity_suffix(name)[0], is_drink=True)
+            })
+
+    priced_lines = drink_price_lines + item_price_lines
 
     prices_block = "\n".join(priced_lines) if priced_lines else "None"
     unresolved_names = [u["raw_text"] for u in unresolved_details]

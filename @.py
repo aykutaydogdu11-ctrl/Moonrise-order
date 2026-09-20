@@ -6,6 +6,8 @@ import json
 import re
 import difflib
 
+import pricing
+
 app = Flask(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
@@ -19,15 +21,22 @@ MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-nano")
 
 # ============================================================
 # DEFAULT MOONRISE CODES
+# Split into DRINK vs FOOD so the deterministic drink-list
+# detector below can tell the difference between "L.Can.SW"
+# (a real drink list) and "E.B.BB.Chips" (a food plate that
+# just happens to also use dot separators).
 # ============================================================
 
-DEFAULT_CODES = {
+DEFAULT_DRINK_CODES = {
     "C": "White Coffee",
     "BC": "Black Coffee",
     "L": "Latte",
+    "Cap": "Cappuccino",
     "Can": "Can drink",
     "Bottle": "Bottle drink",
+}
 
+DEFAULT_FOOD_CODES = {
     "E": "Egg",
     "PE": "Poached Egg",
     "SE": "Scrambled Egg",
@@ -36,6 +45,14 @@ DEFAULT_CODES = {
     "BB": "Baked Beans",
     "Bubble": "Bubble"
 }
+
+DEFAULT_CODES = {**DEFAULT_DRINK_CODES, **DEFAULT_FOOD_CODES}
+
+# Lowercased lookup used only to decide "is this token a known FOOD
+# code?" — learned/taught codes are NOT added to this set because we
+# don't know their category, so they never force a section away from
+# the model's own classification.
+FOOD_CODE_KEYS_LOWER = {key.lower() for key in DEFAULT_FOOD_CODES}
 
 
 # ============================================================
@@ -257,6 +274,15 @@ def update_current_order(current_order, code, meaning):
             continue
 
         if inside_unknown:
+            # A later section header (e.g. "PRICES:", "TOTAL:",
+            # from the pricing step appended after UNKNOWN) ends
+            # the unknown-codes block — stop treating lines as
+            # unknown codes and just pass the rest through as-is.
+            if stripped.endswith(":") and stripped.upper() != "UNKNOWN:":
+                inside_unknown = False
+                output.append(line)
+                continue
+
             if not stripped:
                 continue
 
@@ -286,9 +312,20 @@ def update_current_order(current_order, code, meaning):
             if line.strip().upper() == "UNKNOWN:"
         )
 
+        # The unknown block ends at the next section header (e.g.
+        # "PRICES:") or the end of the text — don't look past it.
+        after = output[unknown_index + 1:]
+        end_offset = len(after)
+
+        for i, line in enumerate(after):
+            s = line.strip()
+            if s.endswith(":") and s.upper() != "UNKNOWN:":
+                end_offset = i
+                break
+
         remaining = [
             line.strip()
-            for line in output[unknown_index + 1:]
+            for line in after[:end_offset]
             if line.strip()
             and line.strip().lower() != "none"
         ]
@@ -297,6 +334,7 @@ def update_current_order(current_order, code, meaning):
             output = (
                 output[:unknown_index + 1]
                 + ["None"]
+                + after[end_offset:]
             )
 
     except StopIteration:
@@ -574,7 +612,7 @@ Did you mean <strong>{{ item.suggested_code }}</strong>
 
 <input type="hidden" name="action" value="learn">
 <input type="hidden" name="code" value="{{ item.code }}">
-<input type="hidden" name="current_order" value="{{ result }}">
+<input type="hidden" name="current_order" value="{{ base_order }}">
 <input type="hidden" name="meaning" value="{{ item.suggested_meaning }}">
 
 <button type="submit" class="main-button">
@@ -602,7 +640,7 @@ value="{{ item.code }}">
 <input
 type="hidden"
 name="current_order"
-value="{{ result }}">
+value="{{ base_order }}">
 
 <input
 type="text"
@@ -616,6 +654,78 @@ class="main-button">
 
 Save
 
+</button>
+
+</form>
+
+</div>
+
+{% endfor %}
+
+</div>
+
+{% endif %}
+
+
+{% if price_unknowns %}
+
+<div class="card">
+
+<h2>Fiyatı Onayla</h2>
+
+<p class="help">
+Fiyatını eminlik ile bulamadığım ürünler var. Doğrusunu seç
+veya elle fiyat gir — bir daha aynı yazımda sormam.
+</p>
+
+
+{% for item in price_unknowns %}
+
+<div class="unknown-box">
+
+<strong>{{ item.raw_text }}</strong>
+
+{% for s in item.suggestions %}
+
+<form method="POST" style="margin-bottom: 6px; margin-top: 6px;">
+
+<input type="hidden" name="action" value="learn_price">
+<input type="hidden" name="raw_text" value="{{ item.raw_text }}">
+<input type="hidden" name="base_order" value="{{ base_order }}">
+<input type="hidden" name="matched_name" value="{{ s.name }}">
+<input type="hidden" name="price" value="{{ '%.2f'|format(s.price) }}">
+
+<button type="submit" class="main-button">
+Bu: {{ s.name }} (£{{ '%.2f'|format(s.price) }})
+</button>
+
+</form>
+
+{% endfor %}
+
+<br>
+
+<form method="POST">
+
+<input type="hidden" name="action" value="learn_price">
+<input type="hidden" name="raw_text" value="{{ item.raw_text }}">
+<input type="hidden" name="base_order" value="{{ base_order }}">
+
+<input
+type="text"
+name="matched_name"
+placeholder="Ürün adı (opsiyonel)"
+style="width:30%">
+
+<input
+type="text"
+name="price"
+placeholder="£ fiyat"
+required
+style="width:20%">
+
+<button type="submit" class="main-button">
+Kaydet
 </button>
 
 </form>
@@ -669,6 +779,19 @@ Never silently omit a line because:
 - you think another section already completed the order
 
 A partially readable line is more useful than a missing line.
+
+==================================================
+DO NOT DUPLICATE SECTIONS
+==================================================
+
+Each physical, horizontally-separated block of handwriting on
+the ticket must appear EXACTLY ONCE in your output, in the same
+order it appears on the paper. Never return the same section
+text twice, even if you are unsure whether you already
+transcribed it — re-read the ticket and count the horizontal
+dividers if needed. If a dish (e.g. "Spanish Omelette / No
+Onion") appears once on the paper, it must appear once in your
+"sections" array, not twice.
 
 ==================================================
 PHYSICAL SECTIONS
@@ -732,6 +855,7 @@ Return your answer using the provided JSON schema:
 - "sections": an ordered array of strings, one entry per
   physical section on the ticket, top to bottom, transcribed
   exactly as handwritten (verbatim, multi-line entries are fine).
+  Each physical section appears exactly once.
 - "table": the table number as a string, or "" if not visible.
 
 Do not add interpretation, commentary, or extra fields.
@@ -744,7 +868,7 @@ Before answering, visually scan the image again from top to
 bottom. Check the final section immediately above the table
 number, and the final token on every line. If readable
 handwriting is missing from your "sections" array, add it
-before answering.
+before answering. Also check that no section appears twice.
 """
 
 
@@ -792,7 +916,10 @@ For EACH section, decide:
 1. "type": "drink" if the section is a short list of drink
    codes separated by dots, slashes, or commas — whether or not
    there are spaces around the separator (e.g. both "L . Can . SW"
-   and "L.Can.SW" are drink lists). Otherwise "food".
+   and "L.Can.SW" are drink lists). A section that lists FOOD
+   codes/items (eggs, bacon, beans, chips, etc.), even if they are
+   also separated by dots, is "food", not "drink" — for example
+   "E . B . BB . Chips" is food. Otherwise "food".
 
 2. "raw_text": copy the section's text back out exactly as
    given, unmodified, preserving any line breaks.
@@ -824,17 +951,21 @@ Input sections:
 1: Hope 4
    No Bubble -> FO
 2: SE on FS
+3: E . B . BB . Chips
 
 Correct output:
 [
   {{"type": "drink", "raw_text": "L . Can . SW", "drink_codes": ["L", "Can", "SW"], "shorthand_tokens": []}},
   {{"type": "food", "raw_text": "Hope 4\\nNo Bubble -> FO", "drink_codes": [], "shorthand_tokens": ["FO"]}},
-  {{"type": "food", "raw_text": "SE on FS", "drink_codes": [], "shorthand_tokens": ["SE", "FS"]}}
+  {{"type": "food", "raw_text": "SE on FS", "drink_codes": [], "shorthand_tokens": ["SE", "FS"]}},
+  {{"type": "food", "raw_text": "E . B . BB . Chips", "drink_codes": [], "shorthand_tokens": ["E", "B", "BB"]}}
 ]
 
 Note that every section is kept (none dropped), "SW" is not
-silently lost, and "FO"/"SE"/"FS" are flagged as shorthand
-tokens without being translated.
+silently lost, "FO"/"SE"/"FS" are flagged as shorthand tokens
+without being translated, and the dotted food plate
+("E . B . BB . Chips") is correctly classified as food, not
+drink, even though it uses dots like a drink list.
 """
 
 
@@ -851,7 +982,7 @@ TRANSCRIPTION_SCHEMA = {
         },
         "sections": {
             "type": "array",
-            "description": "Every physical, horizontally-separated order section, top to bottom, transcribed verbatim.",
+            "description": "Every physical, horizontally-separated order section, top to bottom, transcribed verbatim, each appearing exactly once.",
             "items": {"type": "string"}
         }
     },
@@ -903,6 +1034,35 @@ def build_classification_schema(n_sections):
 
 
 # ============================================================
+# DEDUPE TRANSCRIBED SECTIONS
+# The vision model occasionally re-reads the same handwritten
+# block twice (e.g. "Spanish Omelette / No Onion" appearing as
+# two identical sections instead of one). Since a real ticket
+# never repeats the exact same section text twice in a row,
+# collapse consecutive duplicates before doing anything else.
+# ============================================================
+
+def normalize_section_text(text):
+    return re.sub(r"\s+", " ", (text or "")).strip().lower()
+
+
+def dedupe_sections(sections):
+    deduped = []
+    seen_normalized = set()
+
+    for section in sections:
+        key = normalize_section_text(section)
+
+        if key and key in seen_normalized:
+            continue
+
+        seen_normalized.add(key)
+        deduped.append(section)
+
+    return deduped
+
+
+# ============================================================
 # DRINK-LIST DETECTION — deterministic, done in Python.
 # The AI sometimes fails to notice that a line like "L.Can.SW"
 # (dots with no spaces) is a drink list, and lumps it into
@@ -910,6 +1070,12 @@ def build_classification_schema(n_sections):
 # than trust the AI's own "type" judgement for lines that
 # obviously look like a dotted/slashed/comma code list, detect
 # that shape ourselves and force it to be split correctly.
+#
+# BUT: a food plate like "E.B.BB.Chips" has exactly the same
+# shape (short dotted tokens), so before forcing anything into
+# "drink" we check that none of the tokens are known FOOD
+# codes. If any token is a known food code, this is a food
+# section and we leave the model's own classification alone.
 # ============================================================
 
 def looks_like_drink_list(raw_text):
@@ -934,6 +1100,13 @@ def looks_like_drink_list(raw_text):
         # "Black Coffee"). A long phrase means this probably isn't
         # a simple dotted code list.
         if len(part.split()) > 2 or len(part) > 15:
+            return False
+
+        # If any token is a known FOOD code (Egg, Bacon, Baked
+        # Beans, etc.), this is a food plate, not a drink list —
+        # regardless of dots/shape. This is what stops
+        # "E.B.BB.Chips" from being swept into DRINKS.
+        if part.lower() in FOOD_CODE_KEYS_LOWER:
             return False
 
     return parts
@@ -977,8 +1150,9 @@ def build_final_order(sections, table, known_codes):
             continue
 
         # Override the AI's classification whenever the raw text is
-        # unmistakably a dotted/slashed/comma-separated code list,
-        # regardless of whether spaces surround the separators.
+        # unmistakably a dotted/slashed/comma-separated DRINK code
+        # list (this returns False for food plates like
+        # "E.B.BB.Chips" — see looks_like_drink_list above).
         forced_drink_codes = looks_like_drink_list(raw_text)
 
         if forced_drink_codes:
@@ -1046,7 +1220,9 @@ def build_final_order(sections, table, known_codes):
 def home():
 
     result = ""
+    base_order = ""
     unknowns = []
+    price_unknowns = []
     saved = ""
     error = ""
 
@@ -1069,22 +1245,81 @@ def home():
 
                 save_code(code, meaning)
 
-                result = update_current_order(
+                base_order = update_current_order(
                     current_order,
                     code,
                     meaning
                 )
 
                 unknowns = build_unknown_suggestions(
-                    get_unknowns(result),
+                    get_unknowns(base_order),
                     load_codes()
                 )
+
+                try:
+                    result, _total, price_unknowns = (
+                        pricing.apply_pricing(base_order)
+                    )
+                except Exception:
+                    result = base_order
 
                 saved = (
                     code
                     + " = "
                     + meaning
                     + " learned. Current order updated."
+                )
+
+
+        # ====================================================
+        # LEARN / CONFIRM A PRICE
+        # ====================================================
+
+        elif action == "learn_price":
+
+            raw_text = request.form.get("raw_text", "").strip()
+            matched_name = request.form.get("matched_name", "").strip()
+            price_str = request.form.get("price", "").strip()
+            base_order = request.form.get("base_order", "")
+
+            try:
+                price_value = float(price_str)
+            except ValueError:
+                price_value = None
+
+            if raw_text and price_value is not None:
+
+                pricing.save_learned_price(
+                    raw_text,
+                    matched_name or raw_text,
+                    price_value
+                )
+
+                unknowns = build_unknown_suggestions(
+                    get_unknowns(base_order),
+                    load_codes()
+                )
+
+                try:
+                    result, _total, price_unknowns = (
+                        pricing.apply_pricing(base_order)
+                    )
+                except Exception as e:
+                    result = base_order
+                    error = "Pricing step failed: " + str(e)
+
+                saved = (
+                    raw_text
+                    + " = £"
+                    + f"{price_value:.2f}"
+                    + " learned."
+                )
+            else:
+                error = "Please enter a valid price."
+                result = base_order
+                unknowns = build_unknown_suggestions(
+                    get_unknowns(base_order),
+                    load_codes()
                 )
 
 
@@ -1156,6 +1391,11 @@ def home():
 
                     sections_raw = transcription_json.get("sections", [])
                     table = transcription_json.get("table", "")
+
+                    # Guard against the model re-reading the same
+                    # physical section twice (e.g. one dish appearing
+                    # as two identical "sections" entries).
+                    sections_raw = dedupe_sections(sections_raw)
 
                     if not sections_raw:
                         error = (
@@ -1242,10 +1482,30 @@ def home():
                                 codes
                             )
 
+                            base_order = result
+
                             unknowns = build_unknown_suggestions(
                                 raw_unknowns,
                                 codes
                             )
+
+                            # ============================
+                            # PRICING (Stage 3)
+                            # Runs on the already-resolved
+                            # DRINKS:/ITEMS: text. Never
+                            # blocks showing the order if
+                            # pricing itself fails.
+                            # ============================
+                            try:
+                                result, _total, price_unknowns = (
+                                    pricing.apply_pricing(base_order)
+                                )
+                            except Exception as price_err:
+                                error = (
+                                    (error + " " if error else "")
+                                    + "Pricing step failed: "
+                                    + str(price_err)
+                                )
 
                         except Exception as classify_err:
                             # Classification failed — fall back to the
@@ -1267,10 +1527,19 @@ def home():
                                 codes
                             )
 
+                            base_order = result
+
                             unknowns = build_unknown_suggestions(
                                 raw_unknowns,
                                 codes
                             )
+
+                            try:
+                                result, _total, price_unknowns = (
+                                    pricing.apply_pricing(base_order)
+                                )
+                            except Exception:
+                                pass
 
                             error = (
                                 "Code lookup step failed, showing raw "
@@ -1285,7 +1554,9 @@ def home():
     return render_template_string(
         PAGE,
         result=result,
+        base_order=base_order,
         unknowns=unknowns,
+        price_unknowns=price_unknowns,
         saved=saved,
         error=error
     )

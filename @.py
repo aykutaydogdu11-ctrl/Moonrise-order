@@ -1067,7 +1067,279 @@ UNKNOWN:
 
 Do not create additional headings.
 
+==================================================
+ZERO-LOSS READING RULE
+==================================================
 
+CRITICAL:
+
+EVERY readable handwritten token must survive
+into the final result.
+
+You are NOT allowed to silently omit handwriting
+because you do not understand its meaning.
+
+Unknown handwriting is NOT a reason to remove
+the line.
+
+If part of a line is known and another part is
+unknown:
+
+1. Translate the known codes.
+2. Preserve the unknown code EXACTLY as written.
+3. Keep the complete line in the order.
+4. Add the unknown code to UNKNOWN.
+
+
+Example:
+
+SE on FS
+
+SE is known:
+
+SE = Scrambled Egg
+
+FS is unknown.
+
+Therefore the correct result is:
+
+Scrambled Egg on FS
+
+and:
+
+UNKNOWN:
+FS
+
+
+NEVER delete the whole line because FS is unknown.
+
+
+Another example:
+
+B on XYZ
+
+if B = Bacon and XYZ is unknown:
+
+Bacon on XYZ
+
+UNKNOWN:
+XYZ
+
+
+==================================================
+UNKNOWN CODE INSIDE A PHRASE
+==================================================
+
+An unknown code can appear inside a complete
+food phrase.
+
+Do not treat the entire phrase as unknown.
+
+Example:
+
+SE on FS
+
+Do NOT put:
+
+SE on FS
+
+under UNKNOWN.
+
+Do NOT put:
+
+Scrambled Egg on FS
+
+under UNKNOWN.
+
+Only the unknown shorthand itself belongs there:
+
+FS
+
+
+Keep the complete interpreted phrase under ITEMS:
+
+Scrambled Egg on FS
+
+
+==================================================
+END-OF-LINE CODES MUST NOT DISAPPEAR
+==================================================
+
+Pay special attention to the LAST code written
+on a handwritten line.
+
+The final token must NEVER be ignored merely
+because it appears near the edge of the paper,
+after another known code, or immediately before
+a horizontal separator line.
+
+
+Example:
+
+L . Can . SW
+
+contains THREE drinks:
+
+L
+Can
+SW
+
+
+If L and Can are known but SW is unknown:
+
+DRINKS:
+1- Latte
+2- Can drink
+3- SW
+
+UNKNOWN:
+SW
+
+
+NEVER return only:
+
+1- Latte
+2- Can drink
+
+
+SW must survive.
+
+
+==================================================
+COUNT TOKENS BEFORE INTERPRETING
+==================================================
+
+Before interpreting a handwritten section,
+first make an internal inventory of every
+readable token from LEFT TO RIGHT.
+
+For example, if the drink section reads:
+
+L . Can . SW
+
+the inventory is:
+
+1. L
+2. Can
+3. SW
+
+The final DRINKS section must account for all
+three tokens.
+
+
+For a food phrase:
+
+SE on FS
+
+the inventory is:
+
+1. SE
+2. on
+3. FS
+
+The final result must account for all three:
+
+Scrambled Egg on FS
+
+
+Do this inventory internally.
+
+Do not show the inventory in the final answer.
+
+
+==================================================
+HORIZONTAL SECTIONS MUST ALL BE PROCESSED
+==================================================
+
+Every physical section between horizontal
+handwritten separator lines must be examined.
+
+Do NOT skip an entire section.
+
+If the ticket contains:
+
+SECTION 1:
+L . Can . SW
+
+SECTION 2:
+Hope 4
+No Bubble -> FO
+
+SECTION 3:
+SE on FS
+
+SECTION 4:
+circled 11
+
+
+then ALL FOUR physical sections must appear
+in the interpretation.
+
+
+If FO has previously been learned as Fried onion
+and FS and SW are unknown, the result should be:
+
+DRINKS:
+1- Latte
+2- Can drink
+3- SW
+
+ITEMS:
+1- Hope 4
+   No Bubble -> Fried onion
+
+2- Scrambled Egg on FS
+
+TABLE:
+11
+
+UNKNOWN:
+SW
+FS
+
+
+==================================================
+UNKNOWN DISCOVERY CHECK
+==================================================
+
+After constructing the order, compare the result
+against the handwriting one more time.
+
+For every readable shorthand:
+
+Ask:
+
+"Is this shorthand represented somewhere in
+DRINKS, ITEMS, TABLE or UNKNOWN?"
+
+If the answer is NO, the result is incomplete.
+
+Add it back.
+
+If its meaning is unknown:
+
+preserve the original shorthand
+AND add it to UNKNOWN.
+
+NEVER solve uncertainty by deleting handwriting.
+
+
+==================================================
+ABSOLUTE NO-SKIP RULE
+==================================================
+
+A partially understood line is MORE useful than
+a missing line.
+
+Therefore:
+
+PRESERVE FIRST.
+INTERPRET SECOND.
+ASK THE HUMAN THIRD.
+
+Never:
+
+GUESS OR DELETE.
 ==================================================
 MANDATORY FINAL CHECK
 ==================================================
@@ -1108,6 +1380,35 @@ No Egg -> Bacon
 11. Did I list every unknown shorthand separately?
 
 12. Did I guess the meaning of an unknown code?
+
+13. Did I account for the LAST readable token
+    on every line?
+
+14. Did I process EVERY physical section between
+    horizontal separator lines?
+
+15. Is there any readable shorthand in the image
+    that disappeared from the final result?
+
+16. If part of a phrase is unknown, did I preserve
+    the whole phrase and put ONLY the unknown code
+    under UNKNOWN?
+
+17. For a line such as:
+
+    SE on FS
+
+    if SE is known and FS is unknown, did I return:
+
+    Scrambled Egg on FS
+
+    and:
+
+    UNKNOWN:
+    FS
+
+18. NEVER finish the answer while a readable
+    handwritten token has been silently omitted.
 
 If yes, remove the guess and preserve the original
 shorthand.

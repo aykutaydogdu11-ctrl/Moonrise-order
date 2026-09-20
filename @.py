@@ -32,6 +32,7 @@ DEFAULT_DRINK_CODES = {
     "BC": "Black Coffee",
     "L": "Latte",
     "Cap": "Cappuccino",
+    "T": "Tea",
     "Can": "Can drink",
     "Bottle": "Bottle drink",
 }
@@ -43,6 +44,7 @@ DEFAULT_FOOD_CODES = {
     "B": "Bacon",
     "S": "Sausage",
     "BB": "Baked Beans",
+    "HB": "Hash Brown",
     "Bubble": "Bubble"
 }
 
@@ -247,6 +249,34 @@ def replace_standalone_code(text, code, meaning):
         text,
         flags=re.IGNORECASE
     )
+
+
+# ============================================================
+# QUANTITY SHORTHAND ("Ex2" = 2 Egg, "Tx2" = 2 Tea, or "2E")
+# ============================================================
+
+_QTY_CODE_X = re.compile(r"^([A-Za-z]+)\s*[xX]\s*(\d+)$")
+_QTY_CODE_PREFIX = re.compile(r"^(\d+)\s*([A-Za-z]+)$")
+
+
+def parse_quantity_code(token):
+    """
+    Detect a quantity-suffixed/prefixed code like "Ex2", "E x2",
+    or "2E", and return (base_code, quantity). Returns
+    (token, 1) unchanged if there's no quantity notation.
+    """
+
+    token = token.strip()
+
+    m = _QTY_CODE_X.match(token)
+    if m:
+        return m.group(1), int(m.group(2))
+
+    m = _QTY_CODE_PREFIX.match(token)
+    if m:
+        return m.group(2), int(m.group(1))
+
+    return token, 1
 
 
 def update_current_order(current_order, code, meaning):
@@ -1140,8 +1170,11 @@ def looks_like_drink_list(raw_text):
         # If any token is a known FOOD code (Egg, Bacon, Baked
         # Beans, etc.), this is a food plate, not a drink list —
         # regardless of dots/shape. This is what stops
-        # "E.B.BB.Chips" from being swept into DRINKS.
-        if part.lower() in FOOD_CODE_KEYS_LOWER:
+        # "E.B.BB.Chips" from being swept into DRINKS. Strip any
+        # quantity suffix ("Ex2") before checking, so "Ex2.HB"
+        # is still recognized as food.
+        base_part, _qty = parse_quantity_code(part)
+        if base_part.lower() in FOOD_CODE_KEYS_LOWER:
             return False
 
     return parts
@@ -1162,13 +1195,14 @@ def build_final_order(sections, table, known_codes):
 
     unknowns = []
 
-    def resolve(code):
+    def resolve(code, display=None):
         meaning = known_lower.get(code.strip().lower())
 
         if meaning is None:
-            if code not in unknowns:
-                unknowns.append(code)
-            return code
+            label = display if display else code
+            if label not in unknowns:
+                unknowns.append(label)
+            return label
 
         return meaning
 
@@ -1204,16 +1238,21 @@ def build_final_order(sections, table, known_codes):
 
             for code in codes:
                 drink_num += 1
-                drinks_lines.append(f"{drink_num}- {resolve(code)}")
+                base_code, qty = parse_quantity_code(code)
+                resolved_name = resolve(base_code, display=code)
+                suffix = f" x{qty}" if qty > 1 else ""
+                drinks_lines.append(f"{drink_num}- {resolved_name}{suffix}")
 
         else:
             text = raw_text
 
             for token in (section.get("shorthand_tokens") or []):
-                meaning = known_lower.get(token.strip().lower())
+                base_code, qty = parse_quantity_code(token)
+                meaning = known_lower.get(base_code.strip().lower())
 
                 if meaning is not None:
-                    text = replace_standalone_code(text, token, meaning)
+                    replacement = meaning if qty == 1 else f"{meaning} x{qty}"
+                    text = replace_standalone_code(text, token, replacement)
                 elif token not in unknowns:
                     unknowns.append(token)
 

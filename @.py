@@ -7,6 +7,7 @@ import re
 import difflib
 
 import pricing
+import sales
 
 app = Flask(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -279,6 +280,124 @@ def parse_quantity_code(token):
     return token, 1
 
 
+def get_table_number(base_order):
+    """Pull the table number out of the TABLE: block of a
+    DRINKS:/ITEMS:/TABLE:/UNKNOWN: order text."""
+
+    m = re.search(r"(?im)^TABLE:\s*\n\s*(.+)$", base_order or "")
+
+    if not m:
+        return ""
+
+    value = m.group(1).strip()
+    return "" if value.lower() == "unknown" else value
+
+
+# ============================================================
+# MANUAL ADD / REMOVE
+# Lets staff add ("one more tea") or remove a line from an
+# already-read order without re-photographing the paper ticket —
+# parses the DRINKS:/ITEMS:/TABLE:/UNKNOWN: text into a small
+# structure, edits it, and serializes it back to the same format
+# every other part of the app (pricing, learning) already expects.
+# ============================================================
+
+def parse_order_text(base_order):
+    drinks = []
+    items = []
+    table = get_table_number(base_order)
+    unknown = []
+
+    section = None
+    current_item = None
+
+    for raw_line in (base_order or "").splitlines():
+        stripped = raw_line.strip()
+        upper = stripped.upper()
+
+        if upper == "DRINKS:":
+            section = "drinks"
+            continue
+        if upper == "ITEMS:":
+            section = "items"
+            current_item = None
+            continue
+        if upper == "TABLE:":
+            section = "table"
+            continue
+        if upper == "UNKNOWN:":
+            section = "unknown"
+            continue
+
+        if not stripped:
+            continue
+
+        if section == "drinks":
+            m = _NUMBERED_LINE_APP.match(stripped)
+            if m and m.group(1).strip().lower() != "none":
+                drinks.append(m.group(1).strip())
+
+        elif section == "items":
+            m = _NUMBERED_LINE_APP.match(stripped)
+            if m:
+                if m.group(1).strip().lower() == "none":
+                    current_item = None
+                    continue
+                current_item = {"headline": m.group(1).strip(), "modifiers": []}
+                items.append(current_item)
+            elif current_item is not None:
+                current_item["modifiers"].append(stripped)
+
+        elif section == "unknown":
+            if stripped.lower() != "none":
+                unknown.append(stripped)
+
+    return {"drinks": drinks, "items": items, "table": table, "unknown": unknown}
+
+
+_NUMBERED_LINE_APP = re.compile(r"^\d+-\s*(.+)$")
+
+
+def serialize_order(order):
+    drinks_block = (
+        "\n".join(f"{i + 1}- {d}" for i, d in enumerate(order["drinks"]))
+        if order["drinks"] else "None"
+    )
+
+    items_lines = []
+    for i, it in enumerate(order["items"]):
+        items_lines.append(f"{i + 1}- {it['headline']}")
+        for mod in it["modifiers"]:
+            items_lines.append(f"   {mod}")
+
+    items_block = "\n".join(items_lines) if items_lines else "None"
+    unknown_block = "\n".join(order["unknown"]) if order["unknown"] else "None"
+    table_block = order["table"] if order["table"] else "Unknown"
+
+    return (
+        "DRINKS:\n" + drinks_block + "\n\n"
+        "ITEMS:\n" + items_block + "\n\n"
+        "TABLE:\n" + table_block + "\n\n"
+        "UNKNOWN:\n" + unknown_block
+    )
+
+
+def get_removable_lines(base_order):
+    """List of {"key": "drink:1", "label": "Latte"} for every
+    current line, used to populate the "Çıkar" dropdown."""
+
+    order = parse_order_text(base_order)
+    options = []
+
+    for i, d in enumerate(order["drinks"]):
+        options.append({"key": f"drink:{i + 1}", "label": d})
+
+    for i, it in enumerate(order["items"]):
+        options.append({"key": f"item:{i + 1}", "label": it["headline"]})
+
+    return options
+
+
 def update_current_order(current_order, code, meaning):
     """
     When staff teaches a code:
@@ -542,6 +661,10 @@ input[type="text"] {
 
 <h1>Moonrise Order App</h1>
 
+<p style="margin-top: -15px;">
+<a href="/sales" style="color:#333;">Satış Raporu &rarr;</a>
+</p>
+
 
 <div class="card">
 
@@ -607,6 +730,73 @@ Read Order
 <h2>Order</h2>
 
 <div class="order-box">{{ result }}</div>
+
+{% if base_order %}
+
+<form method="POST" style="margin-top: 14px;">
+
+<input type="hidden" name="action" value="save_sale">
+<input type="hidden" name="base_order" value="{{ base_order }}">
+
+<label>
+Table
+<input type="text" name="table" value="{{ table_number }}" style="width:70px">
+</label>
+
+<button type="submit" class="main-button">
+Sale Kaydet
+</button>
+
+</form>
+
+
+<form method="POST" style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
+
+<input type="hidden" name="action" value="add_item">
+<input type="hidden" name="base_order" value="{{ base_order }}">
+
+<select name="item_section">
+<option value="drink">Drink</option>
+<option value="food">Food</option>
+</select>
+
+<input
+type="text"
+name="item_text"
+placeholder="e.g. T, Ex2, Lasagne"
+style="width:35%">
+
+<input type="number" name="item_qty" value="1" min="1" style="width:55px">
+
+<button type="submit" class="secondary" style="background:#eef0eb;color:#202a1f;border:1px solid #d9ddd5;">
++ Ürün Ekle
+</button>
+
+</form>
+
+
+{% if removable_lines %}
+
+<form method="POST" style="margin-top: 10px;">
+
+<input type="hidden" name="action" value="remove_item">
+<input type="hidden" name="base_order" value="{{ base_order }}">
+
+<select name="remove_line">
+{% for opt in removable_lines %}
+<option value="{{ opt.key }}">{{ opt.label }}</option>
+{% endfor %}
+</select>
+
+<button type="submit" class="secondary" style="background:#fdeaea;color:#9d2f2f;border:1px solid #f0d0d0;">
+Çıkar
+</button>
+
+</form>
+
+{% endif %}
+
+{% endif %}
 
 </div>
 
@@ -1297,6 +1487,7 @@ def home():
     base_order = ""
     unknowns = []
     price_unknowns = []
+    sale_items = []
     saved = ""
     error = ""
 
@@ -1331,7 +1522,7 @@ def home():
                 )
 
                 try:
-                    result, _total, price_unknowns = (
+                    result, _total, price_unknowns, sale_items = (
                         pricing.apply_pricing(base_order)
                     )
                 except Exception:
@@ -1375,7 +1566,7 @@ def home():
                 )
 
                 try:
-                    result, _total, price_unknowns = (
+                    result, _total, price_unknowns, sale_items = (
                         pricing.apply_pricing(base_order)
                     )
                 except Exception as e:
@@ -1395,6 +1586,159 @@ def home():
                     get_unknowns(base_order),
                     load_codes()
                 )
+
+
+        # ====================================================
+        # SAVE SALE (record for turnover/sales-count reporting)
+        # ====================================================
+
+        elif action == "save_sale":
+
+            base_order = request.form.get("base_order", "")
+            table = request.form.get("table", "").strip()
+
+            unknowns = build_unknown_suggestions(
+                get_unknowns(base_order),
+                load_codes()
+            )
+
+            try:
+                result, total, price_unknowns, sale_items = (
+                    pricing.apply_pricing(base_order)
+                )
+
+                if sale_items:
+                    sales.record_sale(
+                        table or get_table_number(base_order),
+                        sale_items,
+                        total
+                    )
+
+                    saved = (
+                        f"Sale saved: {len(sale_items)} item(s), "
+                        f"£{total:.2f} total."
+                    )
+
+                    if price_unknowns:
+                        saved += (
+                            " (Items still needing a price were "
+                            "left out of the sale total.)"
+                        )
+                else:
+                    error = (
+                        "Nothing priced yet to save — resolve the "
+                        "items below first."
+                    )
+
+            except Exception as e:
+                result = base_order
+                error = "Could not save sale: " + str(e)
+
+
+        # ====================================================
+        # ADD ITEM MANUALLY ("one more tea", no re-photographing)
+        # ====================================================
+
+        elif action == "add_item":
+
+            base_order = request.form.get("base_order", "")
+            section_choice = request.form.get("item_section", "drink")
+            entered = request.form.get("item_text", "").strip()
+
+            try:
+                qty_field = int(request.form.get("item_qty", "1") or 1)
+            except ValueError:
+                qty_field = 1
+
+            order = parse_order_text(base_order)
+
+            if entered:
+                codes = load_codes()
+                known_lower = {k.lower(): v for k, v in codes.items()}
+                base_code, embedded_qty = parse_quantity_code(entered)
+                meaning = known_lower.get(base_code.strip().lower())
+
+                effective_qty = max(qty_field, 1) * embedded_qty
+                resolved_text = meaning if meaning is not None else entered
+
+                if meaning is None and base_code == entered:
+                    # A bare unrecognized code (not a full dish name
+                    # like "Lasagne") — flag it like OCR-found
+                    # unknowns so it still shows up to be taught.
+                    if entered not in order["unknown"]:
+                        order["unknown"].append(entered)
+
+                display = (
+                    f"{resolved_text} x{effective_qty}"
+                    if effective_qty > 1 else resolved_text
+                )
+
+                if section_choice == "drink":
+                    order["drinks"].append(display)
+                else:
+                    order["items"].append({"headline": display, "modifiers": []})
+
+                base_order = serialize_order(order)
+                saved = f"Added: {display}"
+            else:
+                error = "Please enter an item to add."
+
+            unknowns = build_unknown_suggestions(
+                get_unknowns(base_order),
+                load_codes()
+            )
+
+            try:
+                result, _total, price_unknowns, sale_items = (
+                    pricing.apply_pricing(base_order)
+                )
+            except Exception as e:
+                result = base_order
+                error = (error + " " if error else "") + "Pricing step failed: " + str(e)
+
+
+        # ====================================================
+        # REMOVE A LINE ("customer cancelled the tea")
+        # ====================================================
+
+        elif action == "remove_item":
+
+            base_order = request.form.get("base_order", "")
+            remove_key = request.form.get("remove_line", "")
+
+            order = parse_order_text(base_order)
+
+            m = re.match(r"^(drink|item)\:(\d+)$", remove_key)
+
+            if m:
+                kind, idx_str = m.group(1), m.group(2)
+                idx = int(idx_str) - 1
+
+                if kind == "drink" and 0 <= idx < len(order["drinks"]):
+                    removed_label = order["drinks"].pop(idx)
+                    saved = f"Removed: {removed_label}"
+                elif kind == "item" and 0 <= idx < len(order["items"]):
+                    removed_label = order["items"].pop(idx)["headline"]
+                    saved = f"Removed: {removed_label}"
+                else:
+                    error = "That line no longer exists."
+            else:
+                error = "Please choose a line to remove."
+
+            base_order = serialize_order(order)
+
+            unknowns = build_unknown_suggestions(
+                get_unknowns(base_order),
+                load_codes()
+            )
+
+            try:
+                result, _total, price_unknowns, sale_items = (
+                    pricing.apply_pricing(base_order)
+                )
+            except Exception as e:
+                result = base_order
+                error = (error + " " if error else "") + "Pricing step failed: " + str(e)
 
 
         # ====================================================
@@ -1571,7 +1915,7 @@ def home():
                             # pricing itself fails.
                             # ============================
                             try:
-                                result, _total, price_unknowns = (
+                                result, _total, price_unknowns, sale_items = (
                                     pricing.apply_pricing(base_order)
                                 )
                             except Exception as price_err:
@@ -1609,7 +1953,7 @@ def home():
                             )
 
                             try:
-                                result, _total, price_unknowns = (
+                                result, _total, price_unknowns, sale_items = (
                                     pricing.apply_pricing(base_order)
                                 )
                             except Exception:
@@ -1629,6 +1973,8 @@ def home():
         PAGE,
         result=result,
         base_order=base_order,
+        table_number=get_table_number(base_order),
+        removable_lines=get_removable_lines(base_order),
         unknowns=unknowns,
         price_unknowns=price_unknowns,
         saved=saved,
@@ -1639,6 +1985,103 @@ def home():
 # ============================================================
 # START APP
 # ============================================================
+
+# ============================================================
+# SALES REPORT PAGE
+# Shows unit counts sold + turnover for today / this week / all
+# time. This is a sales count, not a stock/inventory count — it
+# only reflects orders staff explicitly saved with "Sale Kaydet".
+# ============================================================
+
+SALES_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moonrise Sales Report</title>
+<style>
+body { font-family: Arial, sans-serif; padding: 20px; max-width: 700px; margin: auto; background: #fafafa; }
+h1 { margin-bottom: 10px; }
+h2 { margin-top: 28px; }
+.card { background: white; padding: 18px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #ddd; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid #eee; }
+th { color: #555; font-size: 13px; }
+.total-row td { font-weight: bold; border-top: 2px solid #333; }
+button { padding: 10px 16px; font-size: 15px; cursor: pointer; border-radius: 7px; border: none; }
+.danger { background: #9d2f2f; color: white; }
+.secondary { background: #eef0eb; color: #202a1f; }
+.success { background: #e9f5e9; padding: 12px; border-radius: 7px; margin-bottom: 20px; }
+a { color: #202a1f; }
+</style>
+</head>
+<body>
+
+<h1>Satış Raporu</h1>
+<p><a href="/">&larr; Order App</a></p>
+
+{% if saved %}
+<div class="success"><strong>{{ saved }}</strong></div>
+{% endif %}
+
+{% for period_key, period_label in [("today","Bugün"), ("week","Bu Hafta"), ("all_time","Tüm Zamanlar")] %}
+{% set summary = report[period_key] %}
+
+<div class="card">
+<h2>{{ period_label }} — £{{ "%.2f"|format(summary.revenue) }} ({{ summary.order_count }} sipariş)</h2>
+
+{% if summary.item_counts %}
+<table>
+<tr><th>Ürün</th><th>Adet</th><th>Ciro</th></tr>
+{% for name, qty, revenue in summary.item_counts %}
+<tr><td>{{ name }}</td><td>{{ qty }}</td><td>£{{ "%.2f"|format(revenue) }}</td></tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="muted">Henüz satış yok.</p>
+{% endif %}
+
+</div>
+{% endfor %}
+
+<div class="card">
+<form method="POST" style="display:inline">
+<input type="hidden" name="action" value="undo_last">
+<button type="submit" class="secondary">Son Satışı Geri Al</button>
+</form>
+<form method="POST" style="display:inline" onsubmit="return confirm('Tüm satış kayıtları silinecek. Emin misin?');">
+<input type="hidden" name="action" value="reset_sales">
+<button type="submit" class="danger">Tüm Kayıtları Sıfırla</button>
+</form>
+</div>
+
+</body>
+</html>
+"""
+
+
+@app.route("/sales", methods=["GET", "POST"])
+def sales_report():
+
+    saved = ""
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+
+        if action == "undo_last":
+            removed = sales.delete_last_sale()
+            saved = "Last sale removed." if removed else "No sale to undo."
+
+        elif action == "reset_sales":
+            sales.clear_sales()
+            saved = "All sales records cleared."
+
+    return render_template_string(
+        SALES_PAGE,
+        report=sales.build_report(),
+        saved=saved
+    )
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
